@@ -1,0 +1,29 @@
+; dot-server-query — the server's side of a server query.
+;
+; The distributable is `addons/dot_server_query/`. This project exists so the addon
+; can be opened and validated standalone.
+;
+; `addons/dot_core/`, `addons/dot_server/` and `addons/dot_stats/` are LOCAL
+; SYMLINKS to their sibling repositories and are gitignored. dot-core and
+; dot-server are required; dot-stats is OPTIONAL and is linked here only so the
+; self-test can exercise the bridge against the real addon rather than a stub.
+; See CLAUDE.md.
+
+config_version=5
+
+[application]
+
+config/name="dot-server-query"
+config/description="Server queries: the dot query protocol (DQP) and A2S, answered from one snapshot, on one socket or two."
+config/version="0.1.0"
+run/main_scene="res://examples/query_selftest.tscn"
+config/features=PackedStringArray("4.7", "GL Compatibility")
+
+[editor_plugins]
+
+enabled=PackedStringArray("res://addons/dot_core/plugin.cfg", "res://addons/dot_server/plugin.cfg", "res://addons/dot_server_query/plugin.cfg")
+
+[rendering]
+
+renderer/rendering_method="gl_compatibility"
+renderer/rendering_method.mobile="gl_compatibility"
