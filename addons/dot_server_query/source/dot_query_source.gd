@@ -241,6 +241,14 @@ func _build_info() -> Dictionary:
 		"name": config.hostname,
 		"server_id": config.server_id,
 		"version": DotServer.VERSION,
+		# [b]The RPC surface, so a browser can tell whether it can join before it
+		# tries.[/b] A client whose build declares a different set of `@rpc` methods
+		# cannot complete a join with this server, and the way it finds out is a
+		# connection that opens and then goes silent -- see [DotSignon]. In `info`
+		# rather than in `rules` deliberately: it is the cheapest section, it is the
+		# one a listing already fetches, and a browser that hides or flags the servers
+		# a player cannot join wants it for every row rather than for the one clicked.
+		"signon": DotSignon.revision([DotServer, DotChatManager]),
 		"map": server.games.current_content_id() if _has_games() else "",
 		"game_id": server.games.current().game_id if _has_current_game() else "",
 		"game": _game_description(),

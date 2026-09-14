@@ -90,6 +90,16 @@ The exception is the second rule. **`perf` is excluded from the hash** (`DotQuer
 
 `teams` is read duck-typed from whatever registered as `dot_team_roster`, so dot-team is not named here either; a game with no teams gets an empty section rather than a parse failure.
 
+## `info.signon` is the field a browser needs before it connects
+
+The RPC surface both ends of a join have to agree on, as twelve characters — `DotSignon.revision([DotServer, DotChatManager])`, derived from the `@rpc` method names Godot itself checksums. See dot-server's CLAUDE.md for why that comparison exists and what it looks like when it fails.
+
+**It is in `info` rather than in `rules`, and that is the whole point of putting it here at all.** A client whose build declares a different set of those methods cannot complete a join with this server: Godot refuses to confirm the path, the connection opens and then goes quiet, and the player is eventually told they timed out. The only way to spare them that is to know *before connecting* — which means the answer has to be in the cheapest section, the one a listing already fetches for every row, not in the one you get after clicking a server.
+
+That is what makes "this server needs a different build, open that one" possible for a server browser or a web loader. Without it the only way to discover a mismatch is to suffer it.
+
+It is a normal hashed field: it changes only when the addon's RPC surface changes, which is rare, so it costs conditional polling nothing.
+
 ## The app slug is display-only and says so everywhere
 
 `info.app` — and A2S's `folder`, because that field has always been the short lowercase name a tracker groups servers by, and having the two disagree is how one server appears twice in a list.
