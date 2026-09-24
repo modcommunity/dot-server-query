@@ -63,6 +63,9 @@ func _ready() -> void:
 	config.a2s_app_id = 4242
 	config.a2s_game_folder = "dot"
 	config.tags = PackedStringArray(["example", "dev"])
+	# This run's own directory, emptied first: the audit log appends, and every run had
+	# added its lines to the last one's for as long as the suite existed.
+	DotPaths.remove_tree("user://queryexample")
 	config.admins_path = "user://queryexample/admins.json"
 	config.bans_path = "user://queryexample/bans.json"
 	config.audit_log_path = "user://queryexample/audit.jsonl"
