@@ -153,7 +153,7 @@ find . -name '*.gd' -not -path './.godot/*' | while read f; do
     godot --headless --path . --check-only --script "res://${f#./}"
 done
 
-# 164 checks. Exits non-zero on any failure.
+# 166 checks. Exits non-zero on any failure.
 godot --headless --path . res://examples/query_selftest.tscn
 
 # Run it as an actual server instead of self-testing:

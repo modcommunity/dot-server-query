@@ -25,6 +25,18 @@ var server: DotServer
 var host: DotQueryHost
 var stats_bridge: DotQueryStats
 
+## Sections entered against sections that ran to their last line, and against this. A
+## runtime error inside a section aborts that function and nothing says so; a section that
+## bailed out early after a failed guard is counted as not finished on purpose.
+const SECTIONS := 8
+
+## Every check this suite runs, including the two at the end that compare the counts. The
+## section counter cannot see a section that aborted after announcing itself — its remaining
+## checks simply never run — and a total can. See docs/testing.md.
+const CHECKS := 166
+
+var _entered := 0
+var _completed := 0
 var _passed := 0
 var _failed := 0
 
@@ -132,10 +144,29 @@ func _run_selftest() -> void:
 	_test_a2s_extra_data()
 
 	print("")
+	# The two guards, as the last two checks. See docs/testing.md.
+	_check(
+		"every section ran to its last line (%d of %d)" % [_completed, SECTIONS],
+		_completed == _entered and _entered == SECTIONS
+	)
+	_check(
+		"every check ran (%d of %d)" % [_passed + _failed + 1, CHECKS],
+		_passed + _failed + 1 == CHECKS
+	)
 	print("%d passed, %d failed" % [_passed, _failed])
 
 	server.shutdown("self-test complete")
 	get_tree().quit(1 if _failed > 0 else 0)
+
+
+func _section(title: String) -> void:
+	_entered += 1
+	print(title)
+
+
+## A section reached its last line. See [constant SECTIONS].
+func _done() -> void:
+	_completed += 1
 
 
 func _check(what: String, passed: bool) -> void:
@@ -159,7 +190,7 @@ func _run(line: String) -> String:
 # --- The hook ---------------------------------------------------------------
 
 func _test_host() -> void:
-	print("[host]")
+	_section("[host]")
 
 	_check("the host attached to the server", server.query_host == host)
 	_check("the server exposes the source it was given",
@@ -187,13 +218,14 @@ func _test_host() -> void:
 		server.console.find_command("query_dump") != null)
 	_check("query_status reports both protocols",
 		_run("query_status").contains("[a2s]"))
+	_done()
 
 
 # --- The app slug -----------------------------------------------------------
 
 func _test_app_url() -> void:
 	print("")
-	print("[app url]")
+	_section("[app url]")
 
 	var snap := host.source.snapshot(true)
 
@@ -232,13 +264,14 @@ func _test_app_url() -> void:
 	server.config.a2s_game_folder = "dot"
 	_check("clearing it hands the folder back to the app slug",
 		str(host.source.snapshot(true).info.get("folder", "")) == APP_URL)
+	_done()
 
 
 # --- Extracted coverage: the protocols themselves ---------------------------
 
 func _test_query() -> void:
 	print("")
-	print("[query snapshot]")
+	_section("[query snapshot]")
 
 	var source := host.source
 	_check("query source exists", source != null)
@@ -343,11 +376,12 @@ func _test_query() -> void:
 		(signed["auth"] as Dictionary).has("ts")
 		and (signed["auth"] as Dictionary).has("nonce"))
 	server.config.query_secret = ""
+	_done()
 
 
 func _test_query_protocol() -> void:
 	print("")
-	print("[dot query protocol]")
+	_section("[dot query protocol]")
 
 	var query := host.query
 	if query == null:
@@ -525,11 +559,12 @@ func _test_query_protocol() -> void:
 	_run("sv_query 1")
 	_check("sv_query 1 resumes answering",
 		not query.handle_datagram(challenged, address, port).is_empty())
+	_done()
 
 
 func _test_a2s() -> void:
 	print("")
-	print("[a2s]")
+	_section("[a2s]")
 
 	var query := host.query
 	var a2s := host.a2s
@@ -652,6 +687,7 @@ func _test_a2s() -> void:
 				DotQueryProtocol.TYPE_CHALLENGE_REQUEST, 1, 0
 			), address, port
 		).is_empty())
+	_done()
 
 
 ## Builds an A2S request. [param challenge] of -1 appends nothing.
@@ -730,7 +766,7 @@ class _A2SReader extends RefCounted:
 
 func _test_sections() -> void:
 	print("")
-	print("[sections]")
+	_section("[sections]")
 
 	var source := host.source
 	var snap := source.snapshot(true)
@@ -774,13 +810,14 @@ func _test_sections() -> void:
 	_check("the game section carries it",
 		int(source.snapshot(true).game.get("round", 0)) == 7)
 	source.remove_provider(probe)
+	_done()
 
 
 # --- The dot-stats bridge ---------------------------------------------------
 
 func _test_stats() -> void:
 	print("")
-	print("[stats]")
+	_section("[stats]")
 
 	var source := host.source
 
@@ -831,13 +868,14 @@ func _test_stats() -> void:
 
 	stats_bridge.publish_players = false
 	stats_bridge.attach(null)
+	_done()
 
 
 # --- A2S extra data ---------------------------------------------------------
 
 func _test_a2s_extra_data() -> void:
 	print("")
-	print("[a2s extra data]")
+	_section("[a2s extra data]")
 
 	var query := host.query
 	var a2s := host.a2s
@@ -935,6 +973,7 @@ func _test_a2s_extra_data() -> void:
 		and DotA2SServer._has_extra_block(DotA2SServer.SHIP_APP_ID_LAST))
 	_check("the extra block range is closed",
 		not DotA2SServer._has_extra_block(DotA2SServer.SHIP_APP_ID_LAST + 1))
+	_done()
 
 
 ## Gets a valid A2S challenge for an address, the way a real client would.

@@ -147,7 +147,7 @@ The first two are on by default and identify nobody. **The third is off, and a b
 godot --headless --path . res://examples/query_selftest.tscn
 ```
 
-164 checks. Both protocols run end to end without a socket — `handle_datagram` takes a datagram and returns the datagrams to send back — covering challenge binding, fragmentation, gzip, conditional polling, reflection refusal, rate limiting, and every A2S response read back field by field. The listeners still bind for real as well, so the shared-socket path is exercised rather than assumed.
+166 checks. Both protocols run end to end without a socket — `handle_datagram` takes a datagram and returns the datagrams to send back — covering challenge binding, fragmentation, gzip, conditional polling, reflection refusal, rate limiting, and every A2S response read back field by field. The listeners still bind for real as well, so the shared-socket path is exercised rather than assumed.
 
 ## Licence
 
