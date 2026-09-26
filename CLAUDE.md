@@ -71,6 +71,7 @@ UDP source addresses are forged trivially and a query is a small request produci
 - The previous time bucket is accepted as well, so the real window is one to two TTLs. Without that, a cookie issued a millisecond before a boundary is refused by the time it comes back, and a querier one RTT away can never succeed at all — a bug that only appears under load and looks like packet loss.
 - The secret is generated at boot and never persisted. A restart invalidates every outstanding cookie, which is correct: a restart invalidated everything else a querier knew too.
 - **A response arriving on the listening socket is never answered.** That is how two servers become a reflection loop.
+- **And the rate limiter in front of the challenge is bounded too** (`DotQueryLimiter`, 2026-09-25). Both listeners limit by source address before the HMAC, which is the right order, but that key is an address nobody has proved, and dot-core's `DotRateLimiter` kept one bucket per key and its sweep never evicted a key that had sent one packet — a spoofed flood grew the table by one entry per datagram for the life of the process. The subclass drops refilled buckets (lossless: a refilled bucket is no bucket) and, past `max_tracked` (16,384) addresses, sends unknown ones to one shared bucket rather than refusing them, so a flood cannot lock new queriers out either. `describe()` reports it under `limiter`.
 
 `PING` is answered without a challenge, because `PONG` is smaller than the request. There is nothing to amplify.
 
@@ -153,7 +154,7 @@ find . -name '*.gd' -not -path './.godot/*' | while read f; do
     godot --headless --path . --check-only --script "res://${f#./}"
 done
 
-# 166 checks. Exits non-zero on any failure.
+# 170 checks. Exits non-zero on any failure.
 godot --headless --path . res://examples/query_selftest.tscn
 
 # Run it as an actual server instead of self-testing:

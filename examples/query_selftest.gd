@@ -33,7 +33,7 @@ const SECTIONS := 8
 ## Every check this suite runs, including the two at the end that compare the counts. The
 ## section counter cannot see a section that aborted after announcing itself — its remaining
 ## checks simply never run — and a total can. See docs/testing.md.
-const CHECKS := 166
+const CHECKS := 170
 
 var _entered := 0
 var _completed := 0
@@ -552,6 +552,50 @@ func _test_query_protocol() -> void:
 		if query.handle_datagram(req, flooder, flood_port).is_empty():
 			refused += 1
 	_check("a flood from one address is rate limited", refused > 0)
+
+	# The limiter is keyed by an address nobody has proved yet, so a flood from
+	# forged addresses must not be able to grow it: one bucket per spoofed
+	# datagram, never evicted, was the memory-exhaustion target the challenge
+	# refuses to be. A small cap so the suite does not send sixteen thousand.
+	var known := "192.0.2.50"
+	query._limiter.max_tracked = 64
+	query.handle_datagram(DotQueryProtocol.build_request(
+		DotQueryProtocol.TYPE_CHALLENGE_REQUEST, 1, 0), known, 40000)
+	for i in range(500):
+		query.handle_datagram(DotQueryProtocol.build_request(
+			DotQueryProtocol.TYPE_CHALLENGE_REQUEST, 1, 0
+		), "10.9.%d.%d" % [i / 256, i % 256], 40000)
+	_check("forged addresses cannot grow the DQP limiter (%d held)"
+		% query._limiter.tracked_count(), query._limiter.tracked_count() <= 65)
+	_check("an address it already knew is still answered",
+		not query.handle_datagram(DotQueryProtocol.build_request(
+			DotQueryProtocol.TYPE_CHALLENGE_REQUEST, 2, 0), known, 40000).is_empty())
+	query._limiter.max_tracked = DotQueryLimiter.DEFAULT_MAX_TRACKED
+
+	if host.a2s != null:
+		host.a2s._limiter.max_tracked = 64
+		for i in range(500):
+			host.a2s.handle_datagram(
+				_a2s_request(DotA2SServer.REQUEST_PLAYER, false, 0xFFFFFFFF),
+				"10.10.%d.%d" % [i / 256, i % 256], 40000
+			)
+		_check("nor the A2S one (%d held)" % host.a2s._limiter.tracked_count(),
+			host.a2s._limiter.tracked_count() <= 65)
+		host.a2s._limiter.max_tracked = DotQueryLimiter.DEFAULT_MAX_TRACKED
+	else:
+		_check("nor the A2S one (no A2S server)", false)
+
+	# A refilled bucket is the same as no bucket, so the table sheds those rather
+	# than waiting on an idle timeout — the base sweep compared the stored count and
+	# never shed a key that had sent one packet.
+	var shed := DotQueryLimiter.new(1000.0, 1.0)
+	shed.max_tracked = 8
+	for i in range(8):
+		shed.allow("198.18.0.%d" % i)
+	OS.delay_msec(20)
+	var fresh_allowed := shed.allow("198.18.1.1")
+	_check("a full table sheds refilled buckets before sharing one",
+		fresh_allowed and shed.overflowed() == 0 and shed.tracked_count() <= 8)
 
 	# Turning it off stops answers without closing the socket, so it can be turned
 	# back on without the port moving under whatever was polling it.

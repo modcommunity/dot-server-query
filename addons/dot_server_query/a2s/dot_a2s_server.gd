@@ -161,7 +161,7 @@ var source: DotQuerySource = null
 var challenge: DotQueryChallenge = null
 
 var _udp: PacketPeerUDP = null
-var _limiter: DotRateLimiter = null
+var _limiter: DotQueryLimiter = null
 var _next_split_id: int = 1
 
 var _answered: int = 0
@@ -176,7 +176,7 @@ func setup(p_server: DotServer, p_source: DotQuerySource) -> void:
 	if challenge == null:
 		challenge = DotQueryChallenge.new(server.config.query_challenge_ttl_sec)
 
-	_limiter = DotRateLimiter.new(
+	_limiter = DotQueryLimiter.new(
 		server.config.query_rate_per_second, server.config.query_rate_burst
 	)
 
@@ -648,6 +648,7 @@ func describe() -> Dictionary:
 		"answered": _answered,
 		"challenged": _challenged,
 		"refused": _refused,
+		"limiter": _limiter.describe() if _limiter != null else {},
 		"steam_id": steam_id,
 		"spectator_port": spectator_port,
 		"game_id": game_id,
