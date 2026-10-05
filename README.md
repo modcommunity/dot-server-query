@@ -131,6 +131,8 @@ DotRegistry.get_service(&"dot_query_source").add_provider(ArenaQuery.new())
 
 **The bot count is the one that proves the point.** Nothing in a server framework can know it — a bot is a game concept and the server never sees one connect — so it reaches A2S's bot byte, DQP's `info.bots` and the backbone stats report only through a provider.
 
+**The map is the game's to say, too.** `info.map` and A2S's map field are dot-server's `DotGameManager.reported_map()`: the map the running game reported with `set_current_map`, or the game's display name when it reported none. Reporting a map calls `invalidate()` on the query source, which drops the cached snapshot so the next answer is rebuilt.
+
 ## Statistics, optionally
 
 `DotQueryStats` bridges [dot-stats](https://github.com/modcommunity/dot-stats) without naming it. Three kinds of question: what this box has done since it booted, the published stats totalled across everyone on it, and one row per player.
