@@ -130,8 +130,14 @@ func snapshot(force: bool = false) -> DotQuerySnapshot:
 ##
 ## Worth calling after a game change or a scoring event a tracker should see
 ## promptly. Not required: the cache expires on its own.
+##
+## [b]Drops the snapshot rather than zeroing its age.[/b] This was `_built_ms = 0`, which
+## is "built at process start" and so still fresh for the first `query_cache_sec` of the
+## process's life: a map change reported in that window went on being answered with the
+## old map until the cache expired on its own. Found by the self-test asking A2S for the
+## map a moment after reporting one.
 func invalidate() -> void:
-	_built_ms = 0
+	_snapshot = null
 
 
 func revision() -> int:
@@ -249,7 +255,10 @@ func _build_info() -> Dictionary:
 		# one a listing already fetches, and a browser that hides or flags the servers
 		# a player cannot join wants it for every row rather than for the one clicked.
 		"signon": DotSignon.revision([DotServer, DotChatManager]),
-		"map": server.games.current_content_id() if _has_games() else "",
+		# The game's own map when it reported one, and the game's name when it did not
+		# (see DotGameManager.reported_map). It was the content id unconditionally,
+		# which every A2S listing then printed as `owner/repo` in its map column.
+		"map": server.games.reported_map() if _has_games() else "",
 		"game_id": server.games.current().game_id if _has_current_game() else "",
 		"game": _game_description(),
 		# The app's URL segment, which is what a listing prints to say which game

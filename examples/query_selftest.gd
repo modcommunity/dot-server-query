@@ -33,7 +33,7 @@ const SECTIONS := 8
 ## Every check this suite runs, including the two at the end that compare the counts. The
 ## section counter cannot see a section that aborted after announcing itself — its remaining
 ## checks simply never run — and a total can. See docs/testing.md.
-const CHECKS := 170
+const CHECKS := 174
 
 var _entered := 0
 var _completed := 0
@@ -366,6 +366,17 @@ func _test_query() -> void:
 	for key in ["online", "curUsers", "maxUsers", "bots", "password", "dedicated", "version"]:
 		_check("the report carries `%s` as IngestServerStatsInput spells it" % key, report.has(key))
 
+	# The map is the GAME's to say. It was the content id unconditionally, which every
+	# listing printed as `owner/repo` in its map column.
+	server.games.set_current_map("dm_selftest")
+	_check("a map the game reports is the query's map",
+		str(source.snapshot(true).info.get("map", "")) == "dm_selftest")
+	_check("and the backbone report's", server.to_stats_report().get("map") == "dm_selftest")
+	server.games.set_current_map("")
+	_check("a game that reports none falls back to the game, as before",
+		str(source.snapshot(true).info.get("map", "")) == server.games.reported_map()
+		and server.games.current_map() == "")
+
 	source.remove_provider(provider)
 	_check("provider removed", source.snapshot(true).game.is_empty())
 
@@ -638,6 +649,10 @@ func _test_a2s() -> void:
 	_check("the A2S challenge is address-bound",
 		not a2s.challenge.verify_a2s("198.51.100.21", port, cookie))
 
+	# Set AFTER the snapshot has been built and cached by the challenge round trip, so
+	# this also checks that reporting a map drops the cache rather than leaving a listing
+	# on the previous map for a rebuild interval.
+	server.games.set_current_map("surf_selftest")
 	var info_reply := query.handle_datagram(
 		_a2s_request(DotA2SServer.REQUEST_INFO, true, cookie), address, port
 	)
@@ -648,7 +663,8 @@ func _test_a2s() -> void:
 	_check("info has the 'I' header", info.u8() == DotA2SServer.RESPONSE_INFO)
 	_check("info reports protocol 17", info.u8() == 17)
 	_check("info carries the live hostname", info.cstring() == "Renamed For The Test")
-	info.cstring()  # map
+	_check("info carries the map the game reported", info.cstring() == "surf_selftest")
+	server.games.set_current_map("")
 	# The app slug, not the configured default: a2s_game_folder ships as "dot" on
 	# every server in the family, which makes it useless as the grouping key A2S
 	# clients treat it as. An operator who pins their own still wins — asserted
