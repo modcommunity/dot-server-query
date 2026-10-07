@@ -28,12 +28,12 @@ var stats_bridge: DotQueryStats
 ## Sections entered against sections that ran to their last line, and against this. A
 ## runtime error inside a section aborts that function and nothing says so; a section that
 ## bailed out early after a failed guard is counted as not finished on purpose.
-const SECTIONS := 8
+const SECTIONS := 9
 
 ## Every check this suite runs, including the two at the end that compare the counts. The
 ## section counter cannot see a section that aborted after announcing itself — its remaining
 ## checks simply never run — and a total can. See docs/testing.md.
-const CHECKS := 174
+const CHECKS := 183
 
 var _entered := 0
 var _completed := 0
@@ -145,6 +145,7 @@ func _run_selftest() -> void:
 	_test_query_protocol()
 	_test_a2s()
 	_test_a2s_extra_data()
+	await _test_shared_udp_port()
 
 	print("")
 	# The two guards, as the last two checks. See docs/testing.md.
@@ -754,6 +755,122 @@ func _test_a2s() -> void:
 
 
 ## Builds an A2S request. [param challenge] of -1 appends nothing.
+## ENet, DQP and A2S on ONE UDP port, over real sockets: the default arrangement of a
+## dual-stack server, where the transport's demux owns the port and this addon is a
+## handler on it rather than a socket of its own.
+func _test_shared_udp_port() -> void:
+	print("")
+	_section("[enet, dqp and a2s on one udp port]")
+
+	const SHARED_PORT := 27093
+
+	var config := DotServerConfig.new()
+	config.port = SHARED_PORT
+	config.max_players = 4
+	config.tickrate = 30
+	config.rcon_password = ""
+	config.hostname = "shared udp"
+	config.query_enabled = true
+	config.query_websocket = false
+	config.a2s_enabled = true
+	config.startup_config = ""
+	config.autoexec_config = ""
+	config.hibernate_when_empty = false
+	DotPaths.remove_tree("user://queryexample-shared")
+	config.admins_path = "user://queryexample-shared/admins.json"
+	config.bans_path = "user://queryexample-shared/bans.json"
+	config.audit_log_path = "user://queryexample-shared/audit.jsonl"
+
+	var shared := DotServer.new()
+	shared.name = "SharedServer"
+	shared.config = config
+	shared.config_file = ""
+	shared.auto_boot = false
+	add_child(shared)
+	# Its own MultiplayerAPI: the suite's first server holds the tree's, and two
+	# servers on one API would each hear the other's peers join.
+	get_tree().set_multiplayer(SceneMultiplayer.new(), shared.get_path())
+
+	var shared_host := DotQueryHost.new()
+	shared_host.name = "SharedQueryHost"
+	shared_host.server_ref = DotNodeRef.of_path(NodePath("../SharedServer"))
+	add_child(shared_host)
+
+	var booted: DotResult = await shared.boot()
+	_check("a dual-stack server boots with queries on its port", booted.ok)
+	if not booted.ok:
+		return
+	await get_tree().process_frame
+
+	_check("ENet is advertised on the game port", shared.enet_port() == SHARED_PORT)
+	_check("DQP is a handler on the shared socket",
+		shared_host.query != null and shared_host.query.is_listening())
+	_check("DQP's info carries the ENet port",
+		int(shared_host.source.snapshot().info.get("enet_port", 0)) == SHARED_PORT)
+
+	var udp := PacketPeerUDP.new()
+	udp.bind(0, "127.0.0.1")
+	udp.set_dest_address("127.0.0.1", SHARED_PORT)
+	udp.put_packet(_a2s_request(DotA2SServer.REQUEST_INFO, true, 0))
+	var replies: Array[PackedByteArray] = []
+	var deadline := Time.get_ticks_msec() + 3000
+	while replies.is_empty() and Time.get_ticks_msec() < deadline:
+		await get_tree().process_frame
+		while udp.get_available_packet_count() > 0:
+			replies.append(udp.get_packet())
+	_check("A2S on the game port is answered over a real socket",
+		not replies.is_empty() and replies[0].decode_u32(0) == DotA2SServer.HEADER_SINGLE)
+
+	var cookie := -1
+	if not replies.is_empty():
+		var reader := _A2SReader.new(replies[0])
+		reader.single()
+		reader.u8()
+		cookie = reader.u32()
+	udp.put_packet(_a2s_request(DotA2SServer.REQUEST_INFO, true, cookie))
+	replies.clear()
+	deadline = Time.get_ticks_msec() + 3000
+	while replies.is_empty() and Time.get_ticks_msec() < deadline:
+		await get_tree().process_frame
+		while udp.get_available_packet_count() > 0:
+			replies.append(udp.get_packet())
+	_check("and its keywords name the ENet port",
+		not replies.is_empty() and _bytes_contain(replies[0], ("udp:%d" % SHARED_PORT).to_utf8_buffer()))
+	udp.close()
+
+	var enet_res := DotTransportENet.new().create_client("127.0.0.1", SHARED_PORT)
+	var client: MultiplayerPeer = enet_res.value if enet_res.ok else null
+	var joined := false
+	deadline = Time.get_ticks_msec() + 5000
+	while client != null and Time.get_ticks_msec() < deadline:
+		client.poll()
+		if not shared.sessions().is_empty():
+			joined = true
+			break
+		await get_tree().process_frame
+	_check("an ENet client joins through the same port", joined)
+
+	var session: DotClientSession = shared.sessions()[0] if joined else null
+	_check("and the server sees its real address, not the relay's",
+		session != null and session.address == "127.0.0.1")
+	_check("and knows it came over ENet",
+		session != null and shared.peer_transport(session.peer_id) == "enet")
+
+	if client != null:
+		client.close()
+	shared.shutdown("shared udp section done")
+	shared_host.queue_free()
+	shared.queue_free()
+	_done()
+
+
+func _bytes_contain(haystack: PackedByteArray, needle: PackedByteArray) -> bool:
+	for i in haystack.size() - needle.size() + 1:
+		if haystack.slice(i, i + needle.size()) == needle:
+			return true
+	return false
+
+
 func _a2s_request(request: int, with_payload: bool, challenge: int) -> PackedByteArray:
 	var out := PackedByteArray()
 	out.resize(5)

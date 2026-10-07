@@ -66,6 +66,8 @@ var source: DotQuerySource = null
 var challenge: DotQueryChallenge = null
 
 var _udp: PacketPeerUDP = null
+## True when the game transport owns the UDP port and hands query datagrams over.
+var _shared: bool = false
 var _tcp: TCPServer = null
 var _ws_clients: Array[Dictionary] = []
 
@@ -108,6 +110,17 @@ func open() -> DotResult:
 
 	var config := server.config
 	var port := config.effective_query_port()
+
+	# The game's UDP port may already belong to the transport (ENet behind a demux):
+	# then this is a handler on that socket, A2S included once it is attached.
+	if server.has_method("share_udp_port") \
+			and server.share_udp_port(port, _claims, handle_datagram):
+		_shared = true
+		DotLog.info(CHANNEL, "query listening", {"port": port, "shared_with": "enet"})
+		if config.query_websocket:
+			_open_websocket()
+		set_process(true)
+		return DotResult.success(port)
 
 	_udp = PacketPeerUDP.new()
 	var err := _udp.bind(port, config.effective_query_bind_address())
@@ -170,6 +183,10 @@ func close() -> void:
 		_close_ws_client(client)
 	_ws_clients.clear()
 
+	if _shared:
+		if server != null and server.has_method("unshare_udp_port"):
+			server.unshare_udp_port(handle_datagram)
+		_shared = false
 	if _udp != null:
 		_udp.close()
 		_udp = null
@@ -179,7 +196,20 @@ func close() -> void:
 
 
 func is_listening() -> bool:
-	return _udp != null
+	return _udp != null or _shared
+
+
+## Which datagrams on a shared port are this listener's: DQP, and A2S (answered
+## once A2S is attached, dropped before — an A2S datagram is never ENet's).
+##
+## Runs on every ENet packet too, so the cheap byte test goes before the one that
+## allocates a slice.
+func _claims(data: PackedByteArray) -> bool:
+	if data.is_empty():
+		return false
+	if data[0] == 0xFF:
+		return DotA2SServer.looks_like_a2s(data)
+	return data[0] == 0x44 and DotQueryProtocol.looks_like_dqp(data)
 
 
 ## Whether queries are being answered right now.

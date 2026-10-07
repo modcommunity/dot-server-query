@@ -154,7 +154,7 @@ find . -name '*.gd' -not -path './.godot/*' | while read f; do
     godot --headless --path . --check-only --script "res://${f#./}"
 done
 
-# 170 checks. Exits non-zero on any failure.
+# 183 checks. Exits non-zero on any failure. The last section boots a dual-stack server and asks A2S, and joins over ENet, on one UDP port.
 godot --headless --path . res://examples/query_selftest.tscn
 
 # Run it as an actual server instead of self-testing:

@@ -290,6 +290,15 @@ func _build_info() -> Dictionary:
 		"secure": false,
 	}
 
+	# Where a native client can reach ENet over UDP, when this server serves it.
+	# A native build that reads this tries UDP first and falls back to WebSocket;
+	# absent (or 0) it goes straight to WebSocket, as every client did before.
+	var enet_udp := 0
+	if server != null and server.has_method("enet_port"):
+		enet_udp = int(server.call("enet_port"))
+	if enet_udp > 0:
+		info["enet_port"] = enet_udp
+
 	# Advertised so a tracker that found this server through A2S on the game port
 	# can discover the richer protocol without being told where it is.
 	if config.query_enabled:

@@ -161,6 +161,8 @@ var source: DotQuerySource = null
 var challenge: DotQueryChallenge = null
 
 var _udp: PacketPeerUDP = null
+## True when the game transport owns the UDP port and hands A2S datagrams over.
+var _shared: bool = false
 var _limiter: DotQueryLimiter = null
 var _next_split_id: int = 1
 
@@ -203,6 +205,15 @@ func open() -> DotResult:
 
 	var port := server.config.effective_a2s_port()
 
+	# The game's UDP port may already belong to the transport (ENet behind a demux);
+	# then A2S is a handler on it rather than a socket of its own.
+	if server.has_method("share_udp_port") \
+			and server.share_udp_port(port, looks_like_a2s, handle_datagram):
+		_shared = true
+		set_process(true)
+		DotLog.info(CHANNEL, "A2S listening", {"port": port, "shared_with": "enet"})
+		return DotResult.success(port)
+
 	_udp = PacketPeerUDP.new()
 	var err := _udp.bind(port, server.config.effective_query_bind_address())
 
@@ -233,13 +244,17 @@ static func _bind_advice(port: int) -> String:
 
 
 func close() -> void:
+	if _shared:
+		if server != null and server.has_method("unshare_udp_port"):
+			server.unshare_udp_port(handle_datagram)
+		_shared = false
 	if _udp != null:
 		_udp.close()
 		_udp = null
 
 
 func is_listening() -> bool:
-	return _udp != null
+	return _udp != null or _shared
 
 
 ## Whether A2S requests are being answered right now.
@@ -477,6 +492,12 @@ func _keywords(snap: DotQuerySnapshot) -> String:
 	var query: Variant = snap.info.get("query")
 	if query != null and typeof(query) == TYPE_DICTIONARY:
 		parts.append("dqp:%d" % int((query as Dictionary).get("port", 0)))
+
+	# The ENet port, the same way: a native client browsing over A2S alone still
+	# learns it can join over UDP.
+	var enet_udp := int(snap.info.get("enet_port", 0))
+	if enet_udp > 0:
+		parts.append("udp:%d" % enet_udp)
 
 	return ",".join(Array(parts))
 
