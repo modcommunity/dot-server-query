@@ -130,8 +130,11 @@ func open() -> DotResult:
 		return DotResult.failure(DotError.from_engine(
 			err, "binding the query port %d" % port
 		)).wrap(
-			"Could not open the dot query listener on UDP %d. A UDP transport "
-			% port + "(ENet) already holds that port; set query_port to a free one."
+			# A demuxing transport shared the port above, so this is one that does
+			# not (plain ENet) or another process.
+			"Could not open the dot query listener on UDP %d. Something holds that "
+			% port + "port without sharing it (a UDP transport with no demux, such as "
+			+ "plain ENet, or another process); set query_port to a free one."
 		)
 
 	DotLog.info(CHANNEL, "query listening", {"port": port})

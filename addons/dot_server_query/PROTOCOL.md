@@ -53,9 +53,7 @@ protocol off stops it answering without closing the socket, so it comes back wit
 the port moving under whatever was polling it. `query_status` shows both;
 `query_dump` prints the response a querier would get.
 
-**A UDP game transport (ENet) already holds the game port**, so the bind fails and
-the log says exactly that. Set `query_port` to a free one — and know that most
-trackers will not look there.
+**On the game port, behind dot-server's default transport (`DotTransportDual`), both protocols share the transport's UDP socket**: `share_udp_port` registers them on its demux and nothing binds a second socket. Only a UDP transport that does not share (plain ENet), or another process, still holds the port so that the bind fails, and the log says so. Then set `query_port` to a free one — and know that most trackers will not look there.
 
 ---
 

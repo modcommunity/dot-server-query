@@ -232,14 +232,16 @@ func open() -> DotResult:
 ## Explains the failure that is almost always the reason for one.
 ##
 ## The default A2S port is the game port, because that is where every tracker
-## looks. A server using ENet already holds that port over UDP, so the bind fails —
-## and the fix is a different port plus the knowledge that most trackers will not
-## find it there.
+## looks. A transport that demuxes it ([code]DotTransportDual[/code], dot-server's
+## default) shares it through [code]share_udp_port[/code] and [method open] never
+## binds, so reaching here means something holds the port without sharing it: a
+## plain ENet transport, or another process. The fix is a different port plus the
+## knowledge that most trackers will not find it there.
 static func _bind_advice(port: int) -> String:
 	return (
-		"Could not open A2S on UDP %d. A transport using UDP (ENet) already holds "
-		+ "that port; set a2s_port to a free one — but note most trackers only "
-		+ "look at the game port."
+		"Could not open A2S on UDP %d. Something holds that port without sharing it "
+		+ "(a UDP transport with no demux, such as plain ENet, or another process); "
+		+ "set a2s_port to a free one — but note most trackers only look at the game port."
 	) % port
 
 
