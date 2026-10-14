@@ -33,7 +33,7 @@ const SECTIONS := 9
 ## Every check this suite runs, including the two at the end that compare the counts. The
 ## section counter cannot see a section that aborted after announcing itself — its remaining
 ## checks simply never run — and a total can. See docs/testing.md.
-const CHECKS := 183
+const CHECKS := 185
 
 var _entered := 0
 var _completed := 0
@@ -751,6 +751,10 @@ func _test_a2s() -> void:
 				DotQueryProtocol.TYPE_CHALLENGE_REQUEST, 1, 0
 			), address, port
 		).is_empty())
+	_check("A2S's version is the running game's, not the framework constant",
+		DotA2SServer.a2s_version({"version": "0.1.0", "game_version": "0.1.14"}) == "0.1.14")
+	_check("with no game running, A2S's version is the server's",
+		DotA2SServer.a2s_version({"version": "0.1.0", "game_version": ""}) == "0.1.0")
 	_done()
 
 

@@ -435,7 +435,10 @@ func _info_response() -> PackedByteArray:
 		buf.put_u8(extra_witnesses & 0xFF)
 		buf.put_u8(extra_duration & 0xFF)
 
-	_put_cstring(buf, str(info.get("version", "")))
+	# The running game's version, which is what an operator or a listing means by the
+	# server's version. `version` is the framework's, a constant that never moved from
+	# 0.1.0, so every A2S query answered 0.1.0 whatever release the server was on.
+	_put_cstring(buf, a2s_version(info))
 
 	var tags := _keywords(snap)
 
@@ -709,3 +712,9 @@ func describe_lines() -> PackedStringArray:
 	out.append("edf         %s" % ", ".join(Array(edf)))
 
 	return out
+
+
+## The version string A2S carries: the game's when one is running, the server's otherwise.
+static func a2s_version(info: Dictionary) -> String:
+	var game_version := str(info.get("game_version", ""))
+	return game_version if game_version != "" else str(info.get("version", ""))
