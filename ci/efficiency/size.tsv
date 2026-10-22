@@ -1,0 +1,10 @@
+# size
+# Baselines only shrink: scripts/<gate> --update lowers or drops entries and refuses to add.
+addons/dot_server_query/a2s/dot_a2s_server.gd::_info_response	84
+addons/dot_server_query/source/dot_query_source.gd::_build_info	100
+examples/query_selftest.gd	1247
+examples/query_selftest.gd::_test_a2s	141
+examples/query_selftest.gd::_test_a2s_extra_data	104
+examples/query_selftest.gd::_test_query	119
+examples/query_selftest.gd::_test_query_protocol	225
+examples/query_selftest.gd::_test_shared_udp_port	104
