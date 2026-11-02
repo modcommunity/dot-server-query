@@ -316,7 +316,7 @@ Governed by `query_player_detail`:
 operator cannot correlate their players across servers; publishing the uid to anyone
 who sends a datagram would undo that from the other direction.
 
-Capped at `query_max_players_listed` (128), and `truncated` says so — a tracker
+Capped at `query_max_players_listed` (255, the A2S one-byte count), and `truncated` says so — a tracker
 showing 128 of 400 with no indication is worse than one showing none.
 
 ### `rules`

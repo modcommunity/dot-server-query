@@ -95,7 +95,7 @@ const SPLIT_PAYLOAD_BYTES := SPLIT_SIZE - SPLIT_HEADER_BYTES
 ## Well under A2S's 255-packet limit. A full player list on a 4096-slot server
 ## would otherwise be a 200 kB reply to a 29-byte request, and the challenge only
 ## proves the address is real — not that it wants that much traffic.
-const MAX_SPLIT_PACKETS := 8
+const MAX_SPLIT_PACKETS := 16
 
 ## Longest string field written into a response.
 const MAX_STRING_BYTES := 255
