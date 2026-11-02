@@ -513,7 +513,7 @@ Notes on the encoding:
   something.
 - `folder` is the **app slug**, not a fixed string. It is the field trackers group
   servers by, and the shipped default was the same word on every server here.
-- Multi-packet responses use the protocol's `FE FF FF FF` format, capped at 8 packets.
+- Multi-packet responses use the protocol's `FE FF FF FF` format, capped at 16 packets.
   The reassembled payload is the complete single-packet response, leading
   `FF FF FF FF` included.
 

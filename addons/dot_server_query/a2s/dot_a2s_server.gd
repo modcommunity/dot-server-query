@@ -509,7 +509,7 @@ func _keywords(snap: DotQuerySnapshot) -> String:
 
 func _player_response() -> PackedByteArray:
 	var snap := source.snapshot()
-	var players := snap.players
+	var players := _fit_players(snap.players)
 
 	var buf := _writer()
 	buf.put_u8(RESPONSE_PLAYER)
@@ -547,6 +547,30 @@ func _player_response() -> PackedByteArray:
 			written += 1
 
 	return buf.data_array
+
+
+## The longest prefix of [param all] whose response fits [constant MAX_SPLIT_PACKETS] whole, so the
+## count byte matches what is written instead of [method _split] cutting mid-entry.
+func _fit_players(all: Array) -> Array:
+	var extra := 8 if _has_extra_block(server.config.a2s_app_id) else 0
+	var budget := MAX_SPLIT_PACKETS * SPLIT_PAYLOAD_BYTES - 4 - 2
+	var used := 0
+	var n := 0
+	for entry in all:
+		if n >= 255:
+			break
+		var name_bytes := mini(str((entry as Dictionary).get("name", "")).to_utf8_buffer().size(), MAX_STRING_BYTES)
+		used += 1 + name_bytes + 1 + 8 + extra
+		if used > budget:
+			break
+		n += 1
+	if n < all.size() and n < 255 and not _warned_player_trim:
+		_warned_player_trim = true
+		DotLog.warn(CHANNEL, "A2S player list trimmed to fit the split ceiling", {"players": all.size(), "sent": n})
+	return all.slice(0, n)
+
+
+var _warned_player_trim := false
 
 
 func _rules_response() -> PackedByteArray:
