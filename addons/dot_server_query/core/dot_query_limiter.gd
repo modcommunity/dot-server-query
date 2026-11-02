@@ -2,39 +2,15 @@ class_name DotQueryLimiter
 extends DotRateLimiter
 
 ## dot-core's per-key token bucket, with a ceiling on how many keys it will hold.
-##
-## [b]Why the query listeners cannot use [DotRateLimiter] as it is.[/b] Both of them
-## rate-limit by source address [i]before[/i] the challenge, which is the right order —
-## the limit is what bounds the HMAC work a flood costs — but it means the key is a UDP
-## source address nobody has proved. Forging one costs nothing, so every forged datagram
-## was a new bucket. And the base class's sweep compares the token count [i]as last
-## stored[/i] with the burst, so a key that sent a single packet stored `burst - 1` and
-## was never evicted at all. A spoofed flood grew the table by one entry per packet for
-## the life of the process, and every thirty seconds the sweep walked all of it on the
-## main thread. That is the memory-exhaustion target DotQueryChallenge exists to refuse
-## to be, rebuilt one layer in front of it.
-##
-## Two changes, and neither alters what a caller sees in the ordinary case:
-##
-## - [b]A full bucket is dropped, whatever its idle time.[/b] A bucket that has refilled
-##   behaves exactly like one that does not exist, so evicting it loses nothing. The
-##   base class waits for an idle timeout only because it cannot tell a refilled bucket
-##   from a throttled one; this one does the arithmetic.
-## - [b]Past [member max_tracked] keys, an unknown address shares one bucket.[/b] Refusing
-##   it outright would let a spoofed flood lock every new querier out until the table
-##   drained; giving it a fresh bucket each time is the unbounded table again. One shared
-##   bucket at the configured rate keeps a trickle of answers going and costs one entry.
-##   Addresses already in the table keep their own buckets throughout.
+## Limiting by unproven UDP address would let forged ones grow the table without bound, so full buckets are
+## dropped and past [member max_tracked] keys unknown addresses share one bucket.
 
 ## Addresses held before new ones share [constant OVERFLOW_KEY]. Far more distinct
 ## queriers inside one refill period (burst / rate, five seconds shipped) than a listed
 ## server sees, and a bounded few megabytes however the table is filled.
 const DEFAULT_MAX_TRACKED := 16384
 
-## The key every address shares once the table is full. An int, where every address is a
-## String, so no querier can land in it by name — and not a string with a NUL in it, which
-## is what this was first: the parser replaces the NUL and says so on every parse of every
-## project that links this addon, which a parse guard reads as a failure.
+## The key every address shares once the table is full. An int, so no String address can land in it by name.
 const OVERFLOW_KEY := -1
 
 ## Sweeps no more than this often, so a flood cannot make every packet walk the table.

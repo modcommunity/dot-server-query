@@ -3,101 +3,41 @@ class_name DotQueryStats
 extends Node
 
 ## Publishes declared statistics through the query protocol, optionally.
-##
-## A server browser answers "who is playing". A tracker worth having answers "what
-## happened here" — how many rounds this box has run, how many kills it has counted,
-## what the people on it right now have done. dot-stats already holds all of that;
-## this is the half that lets somebody ask for it from outside.
-##
-## [b]Nothing here names a [code]DotStats*[/code] identifier.[/b] dot-stats is
-## optional and a script mentioning a [code]class_name[/code] the project does not
-## have fails to parse — taking every script that references it down too, which for
-## an addon in the query path means the server stops answering rather than stops
-## reporting statistics. The tracker is reached duck-typed: an object with
-## [code]players()[/code], [code]session_values()[/code] and a [code]schema[/code]
-## is a tracker as far as this is concerned, so a game can also hand over something
-## of its own with that shape.
-##
-## Three kinds of question, which is the split a querier actually wants:
-##
-## [b]server[/b] — what this box has done since it booted. Counted here, not by
-## dot-stats, because it is not per-player and outlives every player on it.
-##
-## [b]game[/b] — the published stats totalled across everyone currently connected.
-## An aggregate identifies nobody, so it is safe to publish and is on by default.
-##
-## [b]players[/b] — one row per connected player. [b]Off by default, and it takes
-## more than a boolean to turn on.[/b] See [member player_key_format].
+## Duck-typed (players(), session_values(), schema): naming a [code]DotStats*[/code] class would break parsing without dot-stats.
+## Sections: server, game (default on), players (default off; see [member player_key_format]).
 
 const CHANNEL := "query"
 const SERVICE := &"dot_query_stats"
 
-## Ceiling on rows in the player_stats section, independent of the player list's.
-##
-## Per-player statistics are many numbers per player where the player list is a
-## handful of fields, so the same count is a much larger response.
+## Ceiling on rows in the player_stats section; per-player rows are much larger than player list entries.
 const MAX_PLAYER_ROWS := 64
 
 @export_group("Source")
 
-## Where to find the statistics tracker. Duck-typed; dot-stats' tracker fits.
-##
-## Left unresolved, the stats sections are simply absent — which is what should
-## happen on a server whose game does not count anything.
+## Where to find the statistics tracker. Duck-typed; unresolved, the stats sections are absent.
 @export var tracker_ref: DotNodeRef = null
 
 @export_group("What to publish")
 
-## Publish the schema: every stat's id, display name, kind and unit.
-##
-## [b]On, because the numbers are illegible without it.[/b] A querier handed
-## [code]{"top_speed": 412.8}[/code] cannot render it — units unknown, decimals
-## unknown, and no idea whether a second reading should replace that or be added to
-## it. The schema is small, static, and the difference between a number and a fact.
+## Publish the schema: every stat's id, display name, kind and unit. On because numbers are illegible without it.
 @export var publish_schema: bool = true
 
-## Publish per-stat totals across the players currently connected.
-##
-## Safe by construction: a sum over everyone on the server identifies nobody, and
-## it is the figure a "busiest server" listing actually wants.
+## Publish per-stat totals across connected players. A sum identifies nobody.
 @export var publish_totals: bool = true
 
 ## Publish one row of statistics per connected player.
-##
-## [b]Off, and a boolean is not enough to turn it on[/b] — see
-## [member player_key_format]. A per-player stat line is a far more detailed
-## record of a person than the name and score A2S publishes, and an operator
-## should have to mean it.
+## Off, and needs [member player_key_format] too: it is a far more detailed record of a person than A2S's.
 @export var publish_players: bool = false
 
 @export_group("Identity")
 
 ## How a connected session's userid becomes the key its statistics were filed under.
-##
-## [b]This is the join that cannot be guessed, and the reason
-## [member publish_players] needs a second setting to work.[/b] A game chooses its
-## own key: this family's games use [code]arena-player-%08d[/code], a bare userid,
-## and a per-account string, and nothing in dot-stats records which. Getting it
-## wrong does not throw — it matches no player and publishes an empty section,
-## which reads as "nobody has done anything" rather than as a misconfiguration.
-##
-## A printf format taking one integer, the session's [code]userid[/code]. Empty
-## refuses to publish player rows however [member publish_players] is set.
-##
-## [b]The key itself is never published.[/b] It is matched against and discarded;
-## rows carry the display name and userid the player list already carries. A game
-## keying statistics by account uid would otherwise publish that uid to anyone who
-## sends a datagram, and dot-user's whole point is that an operator cannot
-## correlate players across servers — undoing it from the query side would be no
-## better than undoing it from the login side.
+## A printf format taking the session's [code]userid[/code]; empty refuses to publish player rows. A wrong
+## format matches nobody and reads as "nothing happened". The key is matched and discarded, never published.
 @export var player_key_format: String = ""
 
 ## An object that maps a session to its statistics key itself, when no format can.
-##
-## Duck-typed: anything with [code]_query_stats_key(session) -> String[/code].
-## Wins over [member player_key_format] when both are set. For a game whose key
-## depends on something other than the userid — an account id it holds elsewhere,
-## or a per-round identity.
+## Duck-typed: [code]_query_stats_key(session) -> String[/code]. Wins over [member player_key_format].
 @export var resolver_ref: DotNodeRef = null
 
 var server: DotServer = null
@@ -162,8 +102,6 @@ func has_tracker() -> bool:
 	return _tracker != null and is_instance_valid(_tracker)
 
 
-# --- Counters --------------------------------------------------------------
-
 func note_session() -> void:
 	_sessions_seen += 1
 
@@ -171,8 +109,6 @@ func note_session() -> void:
 func note_query() -> void:
 	_queries_answered += 1
 
-
-# --- Sections --------------------------------------------------------------
 
 ## Builds the [code]stats[/code] section: schema, server counters and game totals.
 func build_stats(snapshot: DotQuerySnapshot) -> Dictionary:
@@ -231,10 +167,7 @@ func _server_stats() -> Dictionary:
 
 
 ## The published half of the schema, as rows a querier can render.
-##
-## Only stats flagged for publication appear. dot-stats already draws that line for
-## the backbone report and it is the right line here: a stat a game keeps private
-## from its own backend has no business going out over UDP.
+## Only stats flagged for publication appear, as for the backbone report.
 func _schema_rows() -> Array:
 	var out: Array = []
 
@@ -338,8 +271,6 @@ func _key_for(session: DotClientSession) -> String:
 static func _looks_like_tracker(candidate: Object) -> bool:
 	return candidate.has_method("players") and candidate.has_method("session_values")
 
-
-# --- Reporting -------------------------------------------------------------
 
 func describe() -> Dictionary:
 	return {

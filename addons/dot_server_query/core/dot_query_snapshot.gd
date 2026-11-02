@@ -2,18 +2,8 @@ class_name DotQuerySnapshot
 extends RefCounted
 
 ## What the server looks like from outside, at one moment.
-##
-## Both query protocols read this and nothing else. A2S flattens it into its fixed
-## byte layout and loses most of it; DQP serialises it as-is. That is deliberate:
-## a game contributes its state once, and both listeners — and anything else that
-## wants server state, like the backbone stats report — see the same numbers. Two
-## code paths gathering the same facts is two code paths that disagree the first
-## time one is changed.
-##
-## Sections are separate because a querier wants different ones at different times.
-## A server browser refreshing a list wants [code]info[/code] alone, twenty times a
-## second across a thousand servers; a player looking at one server wants
-## [code]players[/code] too. A2S has the same split and it is the right one.
+## Both query protocols read only this, so a game contributes its state once and they cannot disagree.
+## Sections are separate so a list refresh can ask for [code]info[/code] alone.
 
 const SECTION_INFO := "info"
 const SECTION_PLAYERS := "players"
@@ -40,22 +30,10 @@ const ALL_SECTIONS: Array[String] = [
 ]
 
 ## Sections excluded from the revision hash, however much they change.
-##
-## [b]This is what keeps conditional polling worth having.[/b] [code]perf[/code]
-## carries a frame time and a memory figure that differ on every rebuild, so
-## hashing it would mint a new revision every second and [code]if_rev[/code] would
-## never once save a byte — the same trap [code]info.uptime[/code] falls into,
-## and the reason uptime is erased before hashing too. A querier that wants
-## live performance figures is asking every second anyway and is not the one
-## conditional polling exists for.
+## [code]perf[/code] differs on every rebuild and would defeat [code]if_rev[/code] polling.
 const VOLATILE_SECTIONS: Array[String] = [SECTION_PERF]
 
-## Monotonic revision, bumped only when the content actually changed.
-##
-## What makes conditional polling work: a tracker sends the revision it holds and
-## a server that has not changed replies with a few dozen bytes instead of a few
-## kilobytes. Derived from [member etag] rather than from a timer, so a server
-## sitting idle for an hour keeps the same revision for that hour.
+## Monotonic revision, bumped only when the content changed; derived from [member etag], not a timer.
 var rev: int = 0
 
 ## Hash of the content, which is what [member rev] is derived from.
@@ -73,65 +51,34 @@ var players: Array = []
 ## Server variables a querier is allowed to see.
 var rules: Dictionary = {}
 
-## Whatever the game contributes: round number, scores, teams, next map.
-##
-## Free-form on purpose. This is the section A2S has no room for, and the reason a
-## game currently has to smuggle its state into the keywords string.
+## Whatever the game contributes: round number, scores, teams, next map. Free-form on purpose.
 var game: Dictionary = {}
 
-## Sides and their sizes, when a team roster is present.
-##
-## Separate from [member game] because a server browser can render a team list
-## without knowing the game: two sides with counts and scores is the same shape in
-## every team game there has ever been. A game with no teams leaves it empty.
+## Sides and their sizes, when a team roster is present. Separate from [member game] so a browser can render it.
 var teams: Dictionary = {}
 
 ## What is playing, what is next, and what the rotation holds.
-##
-## The question a player deciding whether to join actually asks, and the one A2S
-## cannot answer at all: a server on a map you dislike is worth joining if the next
-## one is a map you like.
 var rotation: Dictionary = {}
 
-## Server health: tick, frame time, memory, uptime.
-##
-## [b]For an operator and a monitor, not for a player.[/b] Published because the
-## alternative is every operator writing the same RCON scraper, and withheld from
-## the revision hash because every field in it changes every frame.
+## Server health: tick, frame time, memory, uptime. For operators and monitors; not in the revision hash.
 var perf: Dictionary = {}
 
-## Engine, addon and platform versions.
-##
-## Static for the life of the process, which makes it the cheapest section to
-## build and the one most worth caching hard. A tracker that reports "17 servers
-## still on the old build" needs exactly this.
+## Engine, addon and platform versions. Static for the life of the process.
 var build: Dictionary = {}
 
-## Declared statistics and their server-wide totals.
-##
-## Filled by the dot-stats bridge when one is attached. The schema half is what
-## makes the numbers legible: a querier receiving [code]{"kills": 4210}[/code] with
-## no units, no display name and no merge rule cannot render it.
+## Declared statistics and their server-wide totals, filled by the dot-stats bridge when attached.
 var stats: Dictionary = {}
 
-## Per-player statistics, for the players currently connected.
-##
-## [b]Off unless an operator turns it on, and never keyed by account id.[/b] See
-## [DotQueryStats] for why both halves of that sentence are load-bearing.
+## Per-player statistics for connected players. Off unless an operator enables it; never keyed by account id.
 var player_stats: Array = []
 
-## Sections that were cut short by a size or policy limit.
-##
-## Reported rather than silently truncated, because a tracker showing 128 of 400
-## players with no indication is worse than one showing none.
+## Sections that were cut short by a size or policy limit, reported so a short list is not silent.
 var truncated: PackedStringArray = PackedStringArray()
 
 
 func _init() -> void:
 	built_at = int(Time.get_unix_time_from_system())
 
-
-# --- Access ----------------------------------------------------------------
 
 func section(name: String) -> Variant:
 	match name:
@@ -176,13 +123,8 @@ func bot_count() -> int:
 	return int(info.get("bots", 0))
 
 
-# --- Serialisation ---------------------------------------------------------
-
 ## The DQP response body, carrying only the sections that were asked for.
-##
-## Unknown section names are reported in [code]unknown[/code] rather than ignored:
-## a querier that misspells one otherwise sees an empty result and concludes the
-## server has no players.
+## Unknown section names are reported in [code]unknown[/code], not ignored.
 func to_dict(sections: PackedStringArray = PackedStringArray()) -> Dictionary:
 	var wanted := sections
 	if wanted.is_empty():

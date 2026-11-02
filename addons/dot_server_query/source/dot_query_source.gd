@@ -3,21 +3,8 @@ class_name DotQuerySource
 extends Node
 
 ## Builds the snapshot both query protocols answer from, and caches it.
-##
-## Registered as [code]dot_query_source[/code] in [DotRegistry], so a game can find
-## it and add a [DotQueryProvider] without being handed a reference.
-##
-## [b]The cache is a security control, not an optimisation.[/b] Gathering a snapshot
-## walks every session and every cvar. Doing that per packet means a querier can
-## make the server do real work by sending small packets, which is the cheapest
-## denial of service there is — and unlike a flood of game traffic it does not even
-## need a connection. Rebuilding at most once per
-## [member DotServerConfig.query_cache_sec] puts a ceiling on it: a thousand queries
-## a second cost one rebuild and a thousand serialisations of an already-built
-## dictionary.
-##
-## Nothing here opens a socket. [DotQueryServer] and [DotA2SServer] do that, and
-## either, both or neither may be running.
+## The cache is a security control: rebuilding at most once per [member DotServerConfig.query_cache_sec]
+## stops small packets from making the server walk every session and cvar per query.
 
 const CHANNEL := "query"
 const SERVICE := &"dot_query_source"
@@ -36,15 +23,7 @@ var server: DotServer = null
 var stats: DotQueryStats = null
 
 ## The app's URL segment on the website, which is this game's code name.
-##
-## [b]Display only, static, and trivially forged — all three on purpose.[/b] The
-## website already gives every app a unique lowercase URL segment, so it is a name
-## that exists, reads well in a listing, and nobody has to invent. A server can of
-## course claim any app it likes; nothing downstream is allowed to treat this as
-## proof, and the pieces that must be certain about which app a server belongs to
-## — a launch resolving a build, a play grant — do it against the backbone, which
-## knows. This is the field a tracker prints next to the hostname.
-##
+## Display only and forgeable: nothing may treat it as proof of which app a server belongs to.
 ## Set through [member DotQueryHost.app_url]. Falls back to the running game's id.
 var app_url: String = ""
 
@@ -65,8 +44,6 @@ func setup(p_server: DotServer) -> void:
 func _exit_tree() -> void:
 	DotRegistry.unregister_instance(SERVICE, self)
 
-
-# --- Providers -------------------------------------------------------------
 
 ## Registers a provider. Validated now so a mistake is a startup error.
 func add_provider(provider: Object) -> DotResult:
@@ -110,8 +87,6 @@ func provider_names() -> PackedStringArray:
 	return out
 
 
-# --- Snapshots -------------------------------------------------------------
-
 ## The current snapshot, rebuilding it if the cache has expired.
 func snapshot(force: bool = false) -> DotQuerySnapshot:
 	var now := Time.get_ticks_msec()
@@ -127,15 +102,7 @@ func snapshot(force: bool = false) -> DotQuerySnapshot:
 
 
 ## Drops the cache, so the next query rebuilds.
-##
-## Worth calling after a game change or a scoring event a tracker should see
-## promptly. Not required: the cache expires on its own.
-##
-## [b]Drops the snapshot rather than zeroing its age.[/b] This was `_built_ms = 0`, which
-## is "built at process start" and so still fresh for the first `query_cache_sec` of the
-## process's life: a map change reported in that window went on being answered with the
-## old map until the cache expired on its own. Found by the self-test asking A2S for the
-## map a moment after reporting one.
+## Drops the snapshot rather than zeroing the build time, which would stay "fresh" early in the process.
 func invalidate() -> void:
 	_snapshot = null
 
@@ -145,10 +112,7 @@ func revision() -> int:
 
 
 ## Counts one answered query, for the stats section's server counters.
-##
-## Forwarded rather than counted here because the listeners already count their
-## own answers for `query_status`; this is the figure that goes out on the wire,
-## and it is the bridge's to keep.
+## Forwarded because this is the figure that goes out on the wire; listeners count their own.
 func note_query() -> void:
 	if stats != null and is_instance_valid(stats):
 		stats.note_query()
@@ -170,10 +134,7 @@ func _build() -> DotQuerySnapshot:
 		snap.player_stats = stats.build_player_stats(snap)
 
 	for provider in _providers:
-		# A provider that throws would otherwise take the query listener down with
-		# it, so each is called in isolation and a freed one is skipped rather than
-		# dereferenced — a module unloaded without removing its provider is exactly
-		# the case that produces one.
+		# Each provider is isolated and a freed one skipped, so one bad module cannot kill the listener.
 		if provider == null or not is_instance_valid(provider):
 			continue
 		DotQueryProvider.contribute_to(provider, snap)
@@ -183,11 +144,7 @@ func _build() -> DotQuerySnapshot:
 
 
 ## Assigns the revision, bumping it only when something meaningful changed.
-##
-## [b]Volatile fields are excluded from the hash on purpose.[/b] Uptime advances
-## every second and per-player timers advance with it; hashing those would make
-## every rebuild a new revision, and conditional polling — the whole reason the
-## revision exists — would never once save a byte.
+## Volatile fields (uptime, timers) are left out of the hash, or conditional polling would never save a byte.
 func _stamp_revision(snap: DotQuerySnapshot) -> void:
 	var stable_info := snap.info.duplicate(true)
 	stable_info.erase("uptime")
@@ -199,10 +156,7 @@ func _stamp_revision(snap: DotQuerySnapshot) -> void:
 		player.erase("ping")
 		stable_players.append(player)
 
-	# perf is absent by name rather than erased, because every field in it differs
-	# on every rebuild — see DotQuerySnapshot.VOLATILE_SECTIONS. Everything else is
-	# hashed: a team score, a rotation change or a stat total moving is exactly the
-	# kind of change a conditional poller is waiting to be told about.
+	# perf is absent by name because all of it differs on every rebuild (DotQuerySnapshot.VOLATILE_SECTIONS).
 	var etag := DotHash.sha256_text(JSON.stringify({
 		"info": stable_info,
 		"players": stable_players,
@@ -222,8 +176,6 @@ func _stamp_revision(snap: DotQuerySnapshot) -> void:
 	snap.rev = _rev
 	snap.etag = etag
 
-
-# --- Sections --------------------------------------------------------------
 
 func _build_info() -> Dictionary:
 	var config := _config()
@@ -247,13 +199,7 @@ func _build_info() -> Dictionary:
 		"name": config.hostname,
 		"server_id": config.server_id,
 		"version": DotServer.VERSION,
-		# [b]The RPC surface, so a browser can tell whether it can join before it
-		# tries.[/b] A client whose build declares a different set of `@rpc` methods
-		# cannot complete a join with this server, and the way it finds out is a
-		# connection that opens and then goes silent -- see [DotSignon]. In `info`
-		# rather than in `rules` deliberately: it is the cheapest section, it is the
-		# one a listing already fetches, and a browser that hides or flags the servers
-		# a player cannot join wants it for every row rather than for the one clicked.
+		# The RPC surface, so a browser can tell whether it can join. In `info` because listings already fetch it.
 		"signon": DotSignon.revision([DotServer, DotChatManager]),
 		# The game's own map when it reported one, and the game's name when it did not
 		# (see DotGameManager.reported_map). It was the content id unconditionally,
@@ -261,10 +207,7 @@ func _build_info() -> Dictionary:
 		"map": server.games.reported_map() if _has_games() else "",
 		"game_id": server.games.current().game_id if _has_current_game() else "",
 		"game": _game_description(),
-		# The app's URL segment, which is what a listing prints to say which game
-		# this is. Also A2S's `folder`, because that field has always been the
-		# short lowercase name a tracker groups servers by, and having the two
-		# disagree is how one server appears twice in a list.
+		# The app slug; also A2S's `folder`, and the two must agree or one server appears twice in a list.
 		"app": effective_app_url(),
 		"folder": _folder(),
 		"players": playing,
@@ -356,10 +299,7 @@ func _build_players(snap: DotQuerySnapshot) -> Array:
 			entry["ping"] = session.ping_ms
 			entry["bot"] = false
 			entry["state"] = session.state_name().to_lower()
-			# Never the account uid. A query response is public, and dot-user's
-			# whole point is that an operator cannot correlate their players across
-			# servers — publishing the identifier to anyone who sends a datagram
-			# would undo that from the other direction.
+			# Never the account uid: a public response must not let anyone correlate players across servers.
 
 		out.append(entry)
 
@@ -386,12 +326,7 @@ func _build_rules() -> Dictionary:
 
 
 ## Whether a cvar may appear in a query response.
-##
-## [b]The refusals are not overridable.[/b] An operator naming a protected cvar in
-## [member DotServerConfig.query_extra_rules] gets it refused, not published: the
-## flag exists precisely because that value must never leave the server, and a
-## config file is not a good enough reason to make an exception. Hidden cvars are
-## implementation detail nobody outside benefits from.
+## Protected cvars are refused even when [member DotServerConfig.query_extra_rules] names them.
 static func _rule_visible(cvar: DotConVar, config: DotServerConfig) -> bool:
 	if cvar.has_flag(DotConVar.FLAG_PROTECTED):
 		return false
@@ -409,15 +344,8 @@ static func _rule_visible(cvar: DotConVar, config: DotServerConfig) -> bool:
 
 
 ## Sides and their sizes, read from a team roster if the project has one.
-##
-## [b]Duck-typed, and dot-team is not named here.[/b] Most games in this family
-## have no teams at all, and a script mentioning a [code]class_name[/code] the
-## project does not have fails to parse — which on this path would stop the server
-## answering queries, not merely stop it reporting teams.
-##
-## A provider may replace this wholesale by writing [code]teams[/code] into the
-## game section; a game with sides that are not a roster — waves, factions, a
-## co-operative team of one — should do exactly that.
+## Duck-typed: naming a missing class_name would fail to parse and stop the server answering queries.
+## A provider may replace this by writing [code]teams[/code] into the game section.
 func _build_teams() -> Dictionary:
 	var roster := DotRegistry.get_service(&"dot_team_roster")
 	if roster == null or not is_instance_valid(roster):
@@ -438,9 +366,6 @@ func _build_teams() -> Dictionary:
 
 
 ## What is playing, what is queued, and what else this server can run.
-##
-## The question A2S cannot answer and a player deciding whether to join actually
-## asks: a server on a map they dislike is worth joining if the next one is not.
 func _build_rotation() -> Dictionary:
 	if not _has_games():
 		return {}
@@ -462,10 +387,7 @@ func _build_rotation() -> Dictionary:
 
 
 ## Server health, for an operator and a monitor rather than for a player.
-##
-## [b]Excluded from the revision hash[/b] — every figure here differs on every
-## rebuild, and hashing them would mint a new revision every second and make
-## conditional polling worthless. See [constant DotQuerySnapshot.VOLATILE_SECTIONS].
+## Excluded from the revision hash; see [constant DotQuerySnapshot.VOLATILE_SECTIONS].
 func _build_perf() -> Dictionary:
 	var out := {
 		"fps": int(Engine.get_frames_per_second()),
@@ -491,9 +413,6 @@ func _build_perf() -> Dictionary:
 
 
 ## Engine, server and platform versions. Static for the life of the process.
-##
-## What a tracker needs to report "seventeen servers are still on the old build",
-## which is the question an operator rolling out an update is actually asking.
 func _build_build() -> Dictionary:
 	var engine := Engine.get_version_info()
 
@@ -510,17 +429,9 @@ func _build_build() -> Dictionary:
 	}
 
 
-# --- Signing ---------------------------------------------------------------
-
 ## Adds an HMAC over the response body when a shared secret is configured.
-##
-## For a listing service that must know the server really said this, rather than
-## someone forging a well-populated server to climb a list. Same shape as the
-## backbone's integration requests — timestamp, nonce, signature — because a site
-## verifying both should not need two implementations.
-##
-## Off unless [member DotServerConfig.query_secret] is set: a signature nobody
-## checks is cost with no benefit.
+## Same shape as the backbone's integration requests (timestamp, nonce, signature).
+## Off unless [member DotServerConfig.query_secret] is set.
 func sign(body: Dictionary) -> Dictionary:
 	var secret := _config().query_secret
 	if secret == "":
@@ -544,12 +455,7 @@ func sign(body: Dictionary) -> Dictionary:
 	return stamped
 
 
-# --- Helpers ---------------------------------------------------------------
-
 ## The player policy in force, preferring the live cvar over the boot config.
-##
-## An operator hiding the roster mid-incident types `sv_query_players none` and
-## expects the next query to honour it, not the next restart.
 func player_detail() -> String:
 	if server != null and server.console != null:
 		return server.console.get_string(
@@ -573,10 +479,7 @@ func _has_current_game() -> bool:
 
 
 ## The app slug this server reports, falling back through what it knows.
-##
-## The console first, so an operator can retag a running server; then the
-## configured value; then the running game's id, which is already slug-shaped and
-## validated by [DotGameDescriptor].
+## The app slug this server reports: console, then config, then the running game's id.
 func effective_app_url() -> String:
 	if server != null and server.console != null:
 		var live := server.console.get_string("sv_query_app", "")
@@ -593,11 +496,7 @@ func effective_app_url() -> String:
 
 
 ## A2S's short folder name: the app slug, or whatever the operator pinned.
-##
-## [member DotServerConfig.a2s_game_folder] still wins when it has been changed
-## from its default, because an operator who set it meant it — but the default
-## "dot" is the same string on every server in the family, which makes it useless
-## as the grouping key A2S clients use it as.
+## The default "dot" is the same on every server here, so it is useless as a grouping key.
 func _folder() -> String:
 	var configured := _config().a2s_game_folder
 	if configured != "" and configured != "dot":

@@ -2,55 +2,17 @@
 class_name DotQueryServer
 extends Node
 
-## The dot query protocol: what a server browser should have been able to ask.
-##
-## A2S answers four fixed questions. This answers whatever the server and the game
-## know, in a document that can grow, over a transport a browser can actually reach.
-## See [DotQueryProtocol] for the wire format and [DotA2SServer] for the
-## compatibility shim that runs beside it.
-##
-## What it does that A2S cannot:
-##
-## [b]It is safe by construction.[/b] Every UDP query is challenged with an
-## address-bound cookie before a single byte of payload is built, so the protocol
-## cannot be used to attack a third party. A2S ran for fifteen years without that.
-##
-## [b]It says more than four things.[/b] Sections are requested à la carte — info,
-## players, rules, and whatever the game contributes through a [DotQueryProvider].
-## Round numbers, team scores, the next map and a lobby's ready count are fields
-## rather than substrings smuggled into the keywords.
-##
-## [b]It tells the truth about a join in progress.[/b] Clients that are connected
-## but still downloading are counted separately, which is the difference between
-## "empty server" and "server nobody can finish joining".
-##
-## [b]Polling it is nearly free.[/b] Every response carries a revision that changes
-## only when something meaningful did. A tracker sends the revision it holds and
-## gets forty bytes back when nothing moved. A list of a thousand servers refreshed
-## every thirty seconds costs almost nothing on either end.
-##
-## [b]A browser can use it.[/b] With [member DotServerConfig.query_websocket] on,
-## the same protocol is served over WebSocket as plain JSON. A web page cannot open
-## a UDP socket, so an in-browser server browser is not possible over A2S at any
-## price — and "click a link and play" needs a server list the link can come from.
-##
-## Registered as [code]dot_query_server[/code] in [DotRegistry].
+## The dot query protocol: sections asked for à la carte. See [DotQueryProtocol] for the wire format.
+## Every UDP query is challenged with an address-bound cookie first; revisions make polling nearly free.
+## With [member DotServerConfig.query_websocket] on, a browser can use it as JSON. Registered as [code]dot_query_server[/code].
 
 const CHANNEL := "query"
 const SERVICE := &"dot_query_server"
 
-## Most a single querier may ask for in one request.
-##
-## Every section there is, plus room to add a few without this becoming the reason
-## a querier cannot ask for them. Asking for all of them is legitimate — that is
-## what `query_dump` and a detail view do — and the ceiling is here to stop a
-## request naming the same section two hundred times, not to ration them.
+## Most a single querier may ask for in one request: every section plus a few spare, to stop one named hundreds of times.
 const MAX_SECTIONS := 16
 
-## Simultaneous WebSocket queriers.
-##
-## A query connection exists to ask a question and go away; a limit this low is
-## generous for that and stops the listener being a way to hold file descriptors.
+## Simultaneous WebSocket queriers; a query connection is short-lived, so this stops file-descriptor hoarding.
 const MAX_WEBSOCKET_CLIENTS := 32
 
 ## Seconds a WebSocket querier may sit idle before it is dropped.
@@ -99,8 +61,6 @@ func _exit_tree() -> void:
 	close()
 	DotRegistry.unregister_instance(SERVICE, self)
 
-
-# --- Listening -------------------------------------------------------------
 
 func open() -> DotResult:
 	if not DotPlatform.can_listen():
@@ -165,10 +125,7 @@ func _open_websocket() -> void:
 
 
 ## Hands A2S datagrams arriving on this socket to the A2S responder.
-##
-## The two protocols are told apart by their first four bytes, so sharing one port
-## costs a comparison — and sharing it is what lets a server answer both on the
-## game port, which is the only port a tracker will look at.
+## The protocols are told apart by their first four bytes, so one game port serves both.
 func attach_a2s(a2s: DotA2SServer) -> void:
 	_a2s = a2s
 	# One secret for both, so an operator reading `query_status` sees one challenge
@@ -202,11 +159,8 @@ func is_listening() -> bool:
 	return _udp != null or _shared
 
 
-## Which datagrams on a shared port are this listener's: DQP, and A2S (answered
-## once A2S is attached, dropped before — an A2S datagram is never ENet's).
-##
-## Runs on every ENet packet too, so the cheap byte test goes before the one that
-## allocates a slice.
+## Which datagrams on a shared port are this listener's: DQP, and A2S once attached.
+## Runs on every ENet packet, so the cheap byte test goes before the one that allocates.
 func _claims(data: PackedByteArray) -> bool:
 	if data.is_empty():
 		return false
@@ -216,10 +170,7 @@ func _claims(data: PackedByteArray) -> bool:
 
 
 ## Whether queries are being answered right now.
-##
-## Separate from [method is_listening]: `sv_query 0` stops answering without
-## closing the socket, so an operator riding out a flood can turn it back on
-## without a restart and without the port changing under whatever was polling it.
+## Separate from [method is_listening]: `sv_query 0` stops answering without closing the socket.
 func is_answering() -> bool:
 	if server == null or server.console == null:
 		return true
@@ -248,12 +199,8 @@ func _poll_udp() -> void:
 			_udp.put_packet(reply)
 
 
-# --- UDP protocol ----------------------------------------------------------
-
 ## Answers one datagram. Returns the datagrams to send back, possibly none.
-##
-## Socket-free, so the self-test drives the entire protocol without binding a port
-## — which also means the protocol is tested on a machine where binding is refused.
+## Socket-free, so the self-test drives the whole protocol without binding a port.
 func handle_datagram(
 	data: PackedByteArray, address: String, port: int
 ) -> Array[PackedByteArray]:
@@ -395,15 +342,8 @@ static func _requested_sections(request: Dictionary) -> PackedStringArray:
 	return out
 
 
-# --- WebSocket -------------------------------------------------------------
-
 ## The same protocol as plain JSON, for queriers that cannot send a datagram.
-##
-## [b]No challenge here, and that is not an oversight.[/b] The cookie exists to
-## prove a UDP source address is real. A WebSocket has already completed a TCP
-## handshake and an HTTP upgrade, so the address is proven by the transport, and
-## the response goes back down the same connection where it cannot be aimed at
-## anybody else. Requiring a cookie as well would be ritual.
+## No challenge: the TCP handshake already proves the address and the reply goes down the same connection.
 func _poll_websocket() -> void:
 	if _tcp == null:
 		return
@@ -544,8 +484,6 @@ func _close_ws_client(client: Dictionary) -> void:
 	if tcp != null:
 		tcp.disconnect_from_host()
 
-
-# --- Reporting -------------------------------------------------------------
 
 func describe() -> Dictionary:
 	return {

@@ -3,43 +3,8 @@ class_name DotA2SServer
 extends Node
 
 ## The A2S query protocol, so existing server trackers can see this server.
-##
-## [b]This exists for compatibility, not because it is good.[/b] A2S is a packed
-## byte layout with positional fields, an extras bitfield, a multi-packet format
-## that differs between engine branches, no room for anything a game knows about
-## itself, and — until 2020 — no defence at all against being used as a DDoS
-## amplifier. [DotQueryServer] is the protocol to reach for.
-##
-## What A2S has is twenty years of tooling. Every server-list site, every chat
-## bot, every [code]python-a2s[/code] script and every "is my server up" monitor
-## speaks it and speaks nothing else. A server that wants to appear in those places
-## has to answer A2S, and inventing a better protocol does not change that.
-##
-## So: off by default ([member DotServerConfig.a2s_enabled]), on when an operator
-## wants to be listed, and when on it answers on the game port over UDP — which is
-## where every one of those tools looks.
-##
-## [b]Every request is challenged[/b], including [code]A2S_INFO[/code]. That was added
-## that in 2020 after years of A2S reflection attacks and modern query libraries
-## handle it; a library old enough not to is old enough to be a reflection risk.
-## See [DotQueryChallenge].
-##
-## Requests handled: [code]A2S_INFO[/code] (0x54), [code]A2S_PLAYER[/code] (0x55),
-## [code]A2S_RULES[/code] (0x56), [code]A2S_SERVERQUERY_GETCHALLENGE[/code] (0x57)
-## and [code]A2A_PING[/code] (0x69) — every request the protocol defines.
-##
-## Every extra-data field is implemented too: the port, a 64-bit server id, the
-## spectator relay pair, keywords and a 64-bit game id, written in the protocol's
-## field order. The three that name an outside platform are 0 and absent unless an
-## operator fills them in, because there is no such platform behind this family
-## and a fabricated identifier is one a client acts on.
-##
-## [b]Two things in the specification are deliberately not here.[/b] Split
-## responses are never compressed: the compressed form is bzip2, the engine ships
-## no bzip2, and the flag is optional — a client that never sees it set never
-## needs one. And the older engine branch's split header, which differs in layout
-## and is told apart by nothing in the packet, is not emitted; every client of the
-## last fifteen years reads the format this sends.
+## For compatibility: trackers speak only A2S. Off by default ([member DotServerConfig.a2s_enabled]).
+## Every request is challenged, [code]A2S_INFO[/code] included, against reflection. See [DotQueryChallenge].
 
 const CHANNEL := "a2s"
 const SERVICE := &"dot_a2s_server"
@@ -62,11 +27,7 @@ const RESPONSE_RULES := 0x45        ## 'E'
 const RESPONSE_CHALLENGE := 0x41    ## 'A'
 const RESPONSE_PING := 0x6A         ## 'j'
 
-## The string an A2S_INFO request carries, null terminator included.
-##
-## Part of the wire format rather than a description of this server, so it is spelled
-## exactly as the protocol spells it: a client sending anything else is not speaking
-## A2S, and a server that accepted something else would answer nothing.
+## The string an A2S_INFO request carries, null terminator included. Wire format, so spelled exactly.
 const INFO_PAYLOAD := "Source Engine Query"
 
 ## Protocol version byte. 17 is what the protocol's servers report and what
@@ -74,11 +35,7 @@ const INFO_PAYLOAD := "Source Engine Query"
 const PROTOCOL_VERSION := 17
 
 ## Extra Data Flag bits, listed in the order A2S serialises the fields they select.
-##
-## [b]That order is not the numeric order of the bits[/b], and writing them in
-## numeric order is the classic way to produce an A2S_INFO response that every
-## client misparses without any of them reporting an error: a reader walks the
-## fields in the sequence below and cannot tell that a writer used another.
+## That order is not the numeric order of the bits; writing them numerically misparses silently.
 const EDF_PORT := 0x80
 const EDF_STEAM_ID := 0x10
 const EDF_SPECTATOR := 0x40
@@ -90,11 +47,7 @@ const SPLIT_SIZE := 1248
 const SPLIT_HEADER_BYTES := 12
 const SPLIT_PAYLOAD_BYTES := SPLIT_SIZE - SPLIT_HEADER_BYTES
 
-## Ceiling on a split response.
-##
-## Well under A2S's 255-packet limit. A full player list on a 4096-slot server
-## would otherwise be a 200 kB reply to a 29-byte request, and the challenge only
-## proves the address is real — not that it wants that much traffic.
+## Ceiling on a split response, well under A2S's 255-packet limit, to bound reply size per small request.
 const MAX_SPLIT_PACKETS := 16
 
 ## Longest string field written into a response.
@@ -104,11 +57,7 @@ const MAX_STRING_BYTES := 255
 const MAX_REQUEST_BYTES := 512
 
 ## App ids that carry the protocol's one game-specific extra block.
-##
-## A closed range in the published specification, and the only place in A2S where
-## a field's presence depends on which game is answering. Gated on the id rather
-## than on a setting so it can never fire by accident: a server that is not one of
-## these games cannot emit the block however it is configured.
+## Gated on the id rather than a setting so a server that is not one of these cannot emit it.
 const SHIP_APP_ID_FIRST := 2400
 const SHIP_APP_ID_LAST := 2412
 
@@ -117,30 +66,17 @@ signal query_answered(address: String, request_type: int)
 @export_group("Extra data (EDF)")
 
 ## 64-bit server identifier, sent as EDF [code]0x10[/code]. 0 omits the field.
-##
-## [b]There is no platform identity behind this family, so it is 0 unless an
-## operator sets it.[/b] Inventing one would be worse than omitting it: a client
-## that reads this expects it to identify the server on a platform that can be
-## asked about it, and a made-up value is a lie it will act on. An operator
-## bridging to something that does have such ids can fill it in.
+## 0 unless an operator sets it: a made-up platform identity is a lie a client acts on.
 @export var steam_id: int = 0
 
-## Port of a spectator relay, sent with [member spectator_name] as EDF
-## [code]0x40[/code]. 0 omits both.
-##
-## For a server that runs a relay a spectator connects to instead of the game —
-## the arrangement every competitive shooter uses so watching costs the game
-## server one client rather than twenty.
+## Port of a spectator relay, sent with [member spectator_name] as EDF [code]0x40[/code]. 0 omits both.
 @export var spectator_port: int = 0
 
 ## Name of the spectator relay. Sent only when [member spectator_port] is set.
 @export var spectator_name: String = ""
 
 ## 64-bit game id, sent as EDF [code]0x01[/code]. 0 omits the field.
-##
-## The protocol's own note is that this supersedes the 16-bit app id when the app
-## id will not fit in 16 bits, so a server setting this should usually set
-## [member DotServerConfig.a2s_app_id] to the truncated value as well.
+## Supersedes the 16-bit app id when that will not fit, so set [member DotServerConfig.a2s_app_id] truncated too.
 @export var game_id: int = 0
 
 @export_group("Game-specific extras")
@@ -190,13 +126,8 @@ func _exit_tree() -> void:
 	DotRegistry.unregister_instance(SERVICE, self)
 
 
-# --- Socket ----------------------------------------------------------------
-
 ## Binds this responder's own UDP socket.
-##
-## Not called when [DotQueryServer] is listening on the same port — it owns the
-## socket then and hands A2S datagrams over, since the two protocols are told apart
-## by their first four bytes.
+## Not called when [DotQueryServer] listens on the same port; it owns the socket and hands datagrams over.
 func open() -> DotResult:
 	if not DotPlatform.can_listen():
 		return DotResult.fail(
@@ -229,14 +160,9 @@ func open() -> DotResult:
 	return DotResult.success(port)
 
 
-## Explains the failure that is almost always the reason for one.
-##
-## The default A2S port is the game port, because that is where every tracker
-## looks. A transport that demuxes it ([code]DotTransportDual[/code], dot-server's
-## default) shares it through [code]share_udp_port[/code] and [method open] never
-## binds, so reaching here means something holds the port without sharing it: a
-## plain ENet transport, or another process. The fix is a different port plus the
-## knowledge that most trackers will not find it there.
+## Explains the usual reason [method open] fails.
+## A demuxing transport shares the game port so open never binds; failing here means a plain ENet
+## transport or another process holds it. Use a different port, which most trackers will not find.
 static func _bind_advice(port: int) -> String:
 	return (
 		"Could not open A2S on UDP %d. Something holds that port without sharing it "
@@ -259,11 +185,7 @@ func is_listening() -> bool:
 	return _udp != null or _shared
 
 
-## Whether A2S requests are being answered right now.
-##
-## `sv_a2s 0` stops answering without closing anything, which is what an operator
-## wants when a tracker is hammering them: A2S is the protocol most likely to be
-## abused and the one most safely turned off, since nothing joining depends on it.
+## Whether A2S requests are being answered right now (`sv_a2s 0` stops answering without closing).
 func is_answering() -> bool:
 	if server == null or server.console == null:
 		return true
@@ -284,8 +206,6 @@ func _process(_delta: float) -> void:
 			_udp.put_packet(reply)
 
 
-# --- Protocol --------------------------------------------------------------
-
 ## Whether a datagram is A2S. Four bytes, so it is safe to run on every packet.
 static func looks_like_a2s(data: PackedByteArray) -> bool:
 	if data.size() < 5:
@@ -294,10 +214,7 @@ static func looks_like_a2s(data: PackedByteArray) -> bool:
 
 
 ## Answers one datagram. Returns the datagrams to send back, possibly none.
-##
-## Pure with respect to sockets, so [DotQueryServer] can call it for packets that
-## arrive on a shared socket and so the self-test can exercise the whole protocol
-## without opening one.
+## Socket-free, so [DotQueryServer] can call it for a shared socket and the self-test can run it.
 func handle_datagram(
 	data: PackedByteArray, address: String, port: int
 ) -> Array[PackedByteArray]:
@@ -379,8 +296,6 @@ func _challenge_ok(
 	return challenge.verify_a2s(address, port, data.decode_u32(offset))
 
 
-# --- Responses -------------------------------------------------------------
-
 func _challenge_response(address: String, port: int) -> PackedByteArray:
 	var buf := _writer()
 	buf.put_u8(RESPONSE_CHALLENGE)
@@ -425,11 +340,8 @@ func _info_response() -> PackedByteArray:
 	buf.put_u8(1 if str(info.get("visibility", "")) == "password" else 0)
 	buf.put_u8(1 if bool(info.get("secure", false)) else 0)
 
-	# The one game-specific block in the protocol, and it sits here — between the
-	# VAC byte and the version string, not in the extra data at the end. A client
-	# for one of these app ids reads it unconditionally, so emitting it for any
-	# other id would shift every following field and produce a response that
-	# parses into nonsense rather than one that visibly fails.
+	# The game-specific block sits between the VAC byte and the version string; emitting it for
+	# any other id shifts every following field.
 	if _has_extra_block(config.a2s_app_id):
 		buf.put_u8(extra_mode & 0xFF)
 		buf.put_u8(extra_witnesses & 0xFF)
@@ -442,12 +354,8 @@ func _info_response() -> PackedByteArray:
 
 	var tags := _keywords(snap)
 
-	# The extra data is a bitfield followed by the fields it selected, and
-	# [b]the fields must be written in the protocol's order, not the bitfield's
-	# numeric order[/b]: port, then server id, then the spectator pair, then
-	# keywords, then game id. A reader walks them in that sequence and has no way
-	# to detect a writer that chose a different one — it simply reads a port out
-	# of the middle of a string.
+	# Extra fields are written in the protocol's order, not the bitfield's numeric order: a reader
+	# cannot detect the difference and reads a port out of the middle of a string.
 	var edf := EDF_PORT
 	if steam_id != 0:
 		edf |= EDF_STEAM_ID
@@ -483,11 +391,7 @@ static func _has_extra_block(app_id: int) -> bool:
 	return app_id >= SHIP_APP_ID_FIRST and app_id <= SHIP_APP_ID_LAST
 
 
-## The keywords string, which is the only extensible field A2S has.
-##
-## Server tags, plus the DQP port when that protocol is running. A tracker that
-## understands [code]dqp:27015[/code] can upgrade to the protocol that will
-## actually tell it something; one that does not shows a tag nobody minds.
+## The keywords string, the only extensible field A2S has: server tags, plus the DQP port when running.
 func _keywords(snap: DotQuerySnapshot) -> String:
 	var parts := PackedStringArray()
 
@@ -528,14 +432,8 @@ func _player_response() -> PackedByteArray:
 		buf.put_float(float(player.get("duration", 0)))
 		index += 1
 
-	# The same app ids that carry an extra A2S_INFO block carry an extra pair per
-	# player here, as a second array after the first rather than as two more
-	# fields inside it. A client for one of those ids reads it unconditionally, so
-	# it is written whether or not the game filled it in — an absent block is not
-	# an empty one, it is a truncated response.
-	#
-	# A provider supplies the numbers by writing `deaths` and `money` onto the
-	# player entries; nothing in dot-server knows either.
+	# The same ids carry a second per-player array, written even when empty: an absent block is a
+	# truncated response. A provider fills it via `deaths` and `money` on the player entries.
 	if _has_extra_block(server.config.a2s_app_id):
 		var written := 0
 		for entry in players:
@@ -588,8 +486,6 @@ func _rules_response() -> PackedByteArray:
 	return buf.data_array
 
 
-# --- Framing ---------------------------------------------------------------
-
 func _writer() -> StreamPeerBuffer:
 	var buf := StreamPeerBuffer.new()
 	# A2S is little-endian throughout. StreamPeerBuffer already is, but a reader of
@@ -599,11 +495,7 @@ func _writer() -> StreamPeerBuffer:
 
 
 ## Writes a null-terminated UTF-8 string, truncated to fit.
-##
-## [b]Truncation is on bytes, not characters, and then repaired.[/b] A hostname
-## with emoji in it cut at a byte boundary produces an invalid UTF-8 sequence, and
-## a client that validates its input drops the whole response — a server that
-## disappears from listings only once somebody renames it.
+## Truncates on bytes then repairs, so a cut emoji does not produce invalid UTF-8 that clients drop.
 static func _put_cstring(buf: StreamPeerBuffer, text: String) -> void:
 	var bytes := text.to_utf8_buffer()
 
@@ -630,11 +522,7 @@ func _single(body: PackedByteArray) -> Array[PackedByteArray]:
 
 
 ## Prefixes the header and splits the result if a client could not receive it whole.
-##
-## The reassembled payload is the complete single-packet response, leading
-## [code]FF FF FF FF[/code] included — that is what every A2S client expects, and
-## getting it wrong produces a response that reassembles into garbage rather than
-## one that visibly fails.
+## The reassembled payload includes the leading [code]FF FF FF FF[/code], as clients expect.
 func _split(body: PackedByteArray) -> Array[PackedByteArray]:
 	var whole := PackedByteArray()
 	whole.resize(4)
@@ -687,8 +575,6 @@ static func _os_byte(name: String) -> int:
 		"macos": return 0x6D     # 'm'
 	return 0x6C                  # 'l'
 
-
-# --- Reporting -------------------------------------------------------------
 
 func describe() -> Dictionary:
 	return {

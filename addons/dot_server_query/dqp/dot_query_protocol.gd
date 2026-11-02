@@ -1,41 +1,9 @@
 class_name DotQueryProtocol
 extends RefCounted
 
-## The dot query protocol (DQP) wire format: one fixed header, then JSON.
-##
-## A2S answers "who is on this server" with a packed byte layout whose fields are
-## positional, whose optional extras are selected by a bitfield, and which cannot
-## be extended without breaking every parser. DQP answers the same question with a
-## 26-byte binary header — everything the transport needs, at fixed offsets, so a
-## parser in any language is twenty lines — followed by a JSON document, which is
-## where the actual answer lives and which can grow a field without breaking
-## anybody.
-##
-## [b]Header, little-endian throughout:[/b]
-## [codeblock]
-## offset size field
-## 0      4    magic "DQP1"
-## 4      1    type
-## 5      1    flags
-## 6      4    transaction id   (echoed; matches a reply to a request)
-## 10     4    response id      (shared by every fragment of one response)
-## 14     2    fragment count   (1 when not fragmented)
-## 16     2    fragment index   (0-based)
-## 18     8    challenge cookie
-## 26     ...  payload
-## [/codeblock]
-##
-## Every packet has the same header, including fragments and errors. A2S's
-## multi-packet header differs between engine branches, differs again when
-## compressed, and is the single most common source of broken query clients; there
-## is nothing to gain from that.
-##
-## Payloads are JSON, optionally gzip-compressed (flagged in the header, and only
-## when the requester said it accepts it). gzip rather than one of Godot's other
-## modes because every language has a gunzip.
-##
-## The magic is checked first and is deliberately unlike A2S's [code]FF FF FF FF[/code],
-## so one UDP socket can serve both protocols by looking at four bytes.
+## The dot query protocol (DQP) wire format: a fixed little-endian header, then JSON (optionally gzip).
+## Header: magic "DQP1"(4) type(1) flags(1) txn(4) response id(4) fragment count(2) index(2) cookie(8).
+## The magic differs from A2S's FF FF FF FF so one UDP socket can serve both.
 
 const MAGIC := "DQP1"
 const MAGIC_BYTES := 4
@@ -64,26 +32,14 @@ const FLAG_GZIP := 1 << 0
 const FLAG_FRAGMENTED := 1 << 1
 
 ## On a request: the sender can decompress a gzip response.
-##
-## [b]Deliberately not the same bit as [constant FLAG_GZIP].[/b] They were, on the
-## reasoning that a request is never compressed so the bit was free — and the
-## header stopped being self-describing: parsing a request meant knowing it was a
-## request, and the parser, which reads the header to find that out, tried to
-## gunzip a plaintext body and failed. One bit, one meaning.
+## Not the same bit as [constant FLAG_GZIP], or a header would not describe itself without knowing its direction.
 const FLAG_ACCEPT_GZIP := 1 << 2
 
-## Kept under the smallest MTU worth worrying about (1280, IPv6's minimum) with
-## room for IPv6 and UDP headers. A datagram that gets IP-fragmented is one that
-## gets dropped by some middlebox on some player's connection, and the resulting
-## bug report is "the server browser doesn't show your server, sometimes".
+## Kept under IPv6's minimum MTU (1280) with header room; an IP-fragmented datagram gets dropped by middleboxes.
 const MAX_DATAGRAM := 1200
 const MAX_PAYLOAD := MAX_DATAGRAM - HEADER_BYTES
 
-## A response is never allowed to become more than this many datagrams.
-##
-## The amplification ceiling. Even a challenged, rate-limited querier must not be
-## able to ask for 400 kB, so a section that would exceed this is truncated and
-## says so.
+## A response is never allowed to become more than this many datagrams (the amplification ceiling).
 const MAX_FRAGMENTS := 16
 
 ## Requests are small by construction; anything larger is not one.
@@ -96,8 +52,6 @@ const MAX_RESPONSE_BYTES := MAX_FRAGMENTS * MAX_PAYLOAD
 const MAX_BODY_BYTES := 1 << 20
 
 
-# --- Parsing ---------------------------------------------------------------
-
 ## Whether a datagram is plausibly DQP. Cheap enough to run on every packet.
 static func looks_like_dqp(data: PackedByteArray) -> bool:
 	if data.size() < HEADER_BYTES:
@@ -106,11 +60,8 @@ static func looks_like_dqp(data: PackedByteArray) -> bool:
 
 
 ## Reads a datagram's header, and its body when it carries one.
-##
-## Returns a dictionary with [code]type[/code], [code]flags[/code],
-## [code]txn[/code], [code]response_id[/code], [code]fragment_count[/code],
-## [code]fragment_index[/code], [code]challenge[/code], [code]payload[/code] and,
-## for a JSON payload that parsed, [code]body[/code].
+## Returns [code]type, flags, txn, response_id, fragment_count, fragment_index, challenge, payload[/code]
+## and, for a JSON payload that parsed, [code]body[/code].
 static func parse(data: PackedByteArray) -> DotResult:
 	if not looks_like_dqp(data):
 		return DotResult.fail(
@@ -122,18 +73,12 @@ static func parse(data: PackedByteArray) -> DotResult:
 	var type := data.decode_u8(4)
 
 	if (flags & FLAG_GZIP) and not (type & 0x80):
-		# A compressed request is refused before it is decompressed. Requests are
-		# small by construction, so one is either a broken client or a zip bomb
-		# aimed at making the server spend CPU on a datagram that cost nothing to
-		# send.
+		# Refused before decompressing: a compressed request is a broken client or a zip bomb.
 		return DotResult.fail(
 			DotError.CODE_INVALID, "Requests are not compressed."
 		)
 
-	# A fragment's payload is a slice of a compressed, serialised whole. Neither
-	# gunzipping nor parsing it makes sense until reassemble() has put the pieces
-	# back — and attempting either logs an engine error on a completely normal
-	# path, which is how a working protocol comes to look broken in a bug report.
+	# A fragment is a slice of a compressed whole; gunzipping or parsing it before reassemble() logs engine errors.
 	var is_fragment := bool(flags & FLAG_FRAGMENTED)
 
 	if (flags & FLAG_GZIP) and not is_fragment:
@@ -196,13 +141,8 @@ static func check_request(packet: Dictionary) -> DotResult:
 	return DotResult.success(type)
 
 
-# --- Building --------------------------------------------------------------
-
-## Encodes a JSON body, compressing it when that is both allowed and worthwhile.
-##
-## Returns [code][bytes, flags][/code]. Compression is skipped for a payload that
-## fits in one datagram uncompressed: the CPU is not free, and a body that already
-## fits gains nothing from being smaller.
+## Encodes a JSON body, compressing it when allowed and worthwhile.
+## Returns [code][bytes, flags][/code]. Bodies that already fit in one datagram skip compression.
 static func encode_body(body: Dictionary, allow_gzip: bool) -> Array:
 	var raw := JSON.stringify(body).to_utf8_buffer()
 
@@ -220,9 +160,7 @@ static func encode_body(body: Dictionary, allow_gzip: bool) -> Array:
 
 
 ## Builds the datagrams for one packet, fragmenting if the payload needs it.
-##
-## Every fragment carries the whole header, so a receiver can reassemble without
-## having seen the first one — which on UDP it frequently has not.
+## Every fragment carries the whole header, so a receiver can reassemble without seeing the first.
 static func build(
 	type: int,
 	txn: int,
@@ -239,11 +177,8 @@ static func build(
 		flags |= FLAG_FRAGMENTED
 
 	if total > MAX_FRAGMENTS:
-		# Clamping here truncates the payload, so the receiver gets a body that
-		# cannot be parsed. Callers must not reach this — DotQueryServer refuses an
-		# oversized response with an error the querier can read instead — and the
-		# warning is here because a silent version of this would look like packet
-		# loss on somebody else's network.
+		# Clamping truncates the payload into an unparseable body. DotQueryServer refuses oversized
+		# responses before this, so reaching it warns rather than looking like packet loss.
 		DotLog.warn(
 			"query",
 			"a response exceeded the fragment ceiling and was truncated",
@@ -304,14 +239,8 @@ static func build_request(
 	return build(type, txn, challenge, payload, flags)[0]
 
 
-# --- Reassembly (the client half) ------------------------------------------
-
-## Reassembles a complete response from its datagrams, in any order.
-##
-## Returns the parsed body. Fragments from different responses are rejected rather
-## than blended: a querier on a busy socket can receive two responses interleaved,
-## and stitching a fragment of one into the other produces a body that parses and
-## is wrong.
+## Reassembles a complete response from its datagrams, in any order, and returns the parsed body.
+## Fragments of different responses are rejected rather than blended into a body that parses wrongly.
 static func reassemble(fragments: Array) -> DotResult:
 	if fragments.is_empty():
 		return DotResult.fail(DotError.CODE_PARSE, "No fragments.")

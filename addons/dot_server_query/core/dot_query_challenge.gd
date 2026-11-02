@@ -2,39 +2,13 @@ class_name DotQueryChallenge
 extends RefCounted
 
 ## Address-bound challenge cookies, stored nowhere.
-##
-## [b]This is the control that stops a query listener being a DDoS amplifier.[/b]
-## UDP source addresses are trivially forged, and a query protocol is a small
-## request producing a large response — exactly the shape an attacker wants. Send a
-## 30-byte request with a victim's address in the source field and the server mails
-## the victim a kilobyte. A2S was used this way for years, which is why a challenge
-## was bolted
-## a challenge onto [code]A2S_INFO[/code] in 2020.
-##
-## The fix is to answer an unchallenged request with nothing but a cookie, and to
-## bind that cookie to the address and port it was sent to. A forger never receives
-## it, so it can never present one — and the reply to the forgery is 26 bytes, which
-## is smaller than the request that provoked it.
-##
-## [b]Nothing is stored.[/b] The cookie is
-## [code]HMAC(secret, address|port|time-bucket)[/code], recomputed on arrival and
-## compared. A stateful challenge table is itself a memory-exhaustion target: an
-## attacker asks for a million challenges from a million forged addresses and the
-## server holds them all. This holds one 32-byte secret regardless of how many
-## challenges are outstanding. Same reasoning as a SYN cookie.
-##
-## The secret is generated at boot and never persisted, so restarting invalidates
-## every outstanding challenge — which is correct, since a restart invalidates
-## everything else a querier knew too.
+## Stops the listener being a DDoS amplifier: a forger never sees the cookie, so a forged request gets 26 bytes.
+## The cookie is [code]HMAC(secret, address|port|time-bucket)[/code], so nothing is stored; a restart voids all.
 
 const SECRET_BYTES := 32
 
 ## Seconds a cookie stays valid for.
-##
-## The previous bucket is accepted as well, so the real window is between one and
-## two of these. Without that, a cookie issued a millisecond before a boundary
-## would be refused by the time it came back and a querier one RTT away could never
-## succeed at all — a bug that only appears under load and looks like packet loss.
+## The previous bucket is accepted too (real window is one to two TTLs), or a cookie issued just before a boundary fails.
 var ttl_sec: float = 30.0
 
 var _secret: PackedByteArray = PackedByteArray()
@@ -49,8 +23,6 @@ func _init(p_ttl_sec: float = 30.0) -> void:
 func rotate_secret() -> void:
 	_secret = DotHash.random_bytes(SECRET_BYTES)
 
-
-# --- Issuing and verifying -------------------------------------------------
 
 ## An 8-byte cookie for the dot query protocol, as a positive integer.
 func issue(address: String, port: int) -> int:
@@ -93,8 +65,6 @@ func _verify(address: String, port: int, value: int, width: int) -> bool:
 	return matched
 
 
-# --- Internals -------------------------------------------------------------
-
 func _cookie(address: String, port: int, bucket: int, width: int) -> PackedByteArray:
 	# The port is part of the binding, not just the address. A forger who can guess
 	# an address still has to guess the source port the cookie was mailed to, and a
@@ -106,10 +76,8 @@ func _cookie(address: String, port: int, bucket: int, width: int) -> PackedByteA
 	var raw := DotHash.hmac_sha256(_secret, message.to_utf8_buffer())
 	var cookie := raw.slice(0, width)
 
-	# Clear the top bit of the most significant byte (little-endian, so the last
-	# one). Keeps the cookie positive in GDScript's signed 64-bit ints and in A2S's
-	# int32, and guarantees it can never be 0xFFFFFFFF — the value A2S reserves for
-	# "send me a challenge".
+	# Clear the top bit of the top byte (little-endian): keeps the cookie positive in int64/int32 and never
+	# 0xFFFFFFFF, the value A2S reserves for "send me a challenge".
 	cookie[width - 1] = cookie[width - 1] & 0x7F
 	return cookie
 

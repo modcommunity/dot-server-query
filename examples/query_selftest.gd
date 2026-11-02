@@ -1,19 +1,8 @@
 extends Node
 
-## Boots a server with a query host attached and exercises both protocols end to end.
-##
-## [b]Neither protocol needs a socket to be tested.[/b] `handle_datagram` takes a
-## datagram and returns the datagrams to send back, so the whole of DQP and A2S —
-## challenge binding, fragmentation, gzip, conditional polling, reflection refusal,
-## rate limiting, and every A2S response read back field by field — runs in
-## process. The listeners still bind for real as well, so the shared-socket path
-## is exercised rather than assumed.
-##
-## [codeblock]
-## godot --headless --path . res://examples/query_selftest.tscn
-## [/codeblock]
-##
-## Exits non-zero if any check fails.
+## Boots a server with a query host attached and exercises both protocols end to end, in process:
+## [code]handle_datagram[/code] takes a datagram and returns the replies; the listeners still bind for real.
+## Run: [code]godot --headless --path . res://examples/query_selftest.tscn[/code]. Exits non-zero on failure.
 
 const SELFTEST_ARG := "--selftest"
 
@@ -44,10 +33,8 @@ var _failed := 0
 func _ready() -> void:
 	var config := DotServerConfig.new()
 
-	# Ephemeral, so this never collides with a real server or a second copy of
-	# itself. The query port is explicit for the same reason the example in
-	# dot-server makes it explicit: an ephemeral game port has nothing to derive
-	# one from.
+	# Ephemeral, so this never collides with a real server or a second copy of itself.
+	# The query port is explicit because an ephemeral game port has nothing to derive one from.
 	config.port = 0
 	config.max_players = 16
 	config.reserved_slots = 2
@@ -131,8 +118,6 @@ func _should_selftest() -> bool:
 	return DotPlatform.is_headless()
 
 
-# --- Self-test -------------------------------------------------------------
-
 func _run_selftest() -> void:
 	print("=== self-test ===")
 	print("")
@@ -191,8 +176,6 @@ func _run(line: String) -> String:
 	return "\n".join(lines)
 
 
-# --- The hook ---------------------------------------------------------------
-
 func _test_host() -> void:
 	_section("[host]")
 
@@ -224,8 +207,6 @@ func _test_host() -> void:
 		_run("query_status").contains("[a2s]"))
 	_done()
 
-
-# --- The app slug -----------------------------------------------------------
 
 func _test_app_url() -> void:
 	print("")
@@ -271,8 +252,6 @@ func _test_app_url() -> void:
 	_done()
 
 
-# --- Extracted coverage: the protocols themselves ---------------------------
-
 func _test_query() -> void:
 	print("")
 	_section("[query snapshot]")
@@ -284,11 +263,8 @@ func _test_query() -> void:
 
 	_check("query listener bound", host.query != null and host.query.is_listening())
 
-	# The query listeners bind their own interface when told to, because a server
-	# behind a reverse proxy binds the GAME transport to loopback and a reverse
-	# proxy cannot forward UDP — so sharing one setting put the query port where
-	# no tracker could reach it. Empty means "wherever the game is", which is what
-	# every other deployment wants and what this one is running.
+	# The query listeners bind their own interface when told to: behind a reverse proxy the GAME
+	# transport sits on loopback and UDP cannot be proxied. Empty means "wherever the game is".
 	var bind_cfg := DotServerConfig.new()
 	bind_cfg.bind_address = "127.0.0.1"
 	_check("query binds the game interface by default",
@@ -565,10 +541,8 @@ func _test_query_protocol() -> void:
 			refused += 1
 	_check("a flood from one address is rate limited", refused > 0)
 
-	# The limiter is keyed by an address nobody has proved yet, so a flood from
-	# forged addresses must not be able to grow it: one bucket per spoofed
-	# datagram, never evicted, was the memory-exhaustion target the challenge
-	# refuses to be. A small cap so the suite does not send sixteen thousand.
+	# The limiter is keyed by an address nobody has proved yet, so forged addresses must not grow it:
+	# one never-evicted bucket per spoofed datagram is the memory-exhaustion target. Small cap keeps the suite quick.
 	var known := "192.0.2.50"
 	query._limiter.max_tracked = 64
 	query.handle_datagram(DotQueryProtocol.build_request(
@@ -666,10 +640,8 @@ func _test_a2s() -> void:
 	_check("info carries the live hostname", info.cstring() == "Renamed For The Test")
 	_check("info carries the map the game reported", info.cstring() == "surf_selftest")
 	server.games.set_current_map("")
-	# The app slug, not the configured default: a2s_game_folder ships as "dot" on
-	# every server in the family, which makes it useless as the grouping key A2S
-	# clients treat it as. An operator who pins their own still wins — asserted
-	# in _test_app_url.
+	# The app slug, not the configured default: a2s_game_folder ships as "dot" on every server,
+	# useless as the grouping key A2S clients treat it as. An operator who pins their own still wins (_test_app_url).
 	_check("info carries the app slug as its folder", info.cstring() == APP_URL)
 	info.cstring()  # game description
 	_check("info carries the app id", info.u16() == 4242)
@@ -688,7 +660,7 @@ func _test_a2s() -> void:
 	_check("info sets the keywords flag", (edf & DotA2SServer.EDF_KEYWORDS) != 0)
 	var keywords := info.cstring()
 	_check("keywords carry the server tags", keywords.contains("example"))
-	# The one extensible field A2S has, used to point a tracker at the protocol
+	# The one extensible field A2S has, pointing a tracker at the protocol
 	# that will actually tell it something.
 	_check("keywords advertise the dot query port", keywords.contains("dqp:"))
 	_check("info was read exactly to its end", info.at_end())
@@ -759,9 +731,8 @@ func _test_a2s() -> void:
 
 
 ## Builds an A2S request. [param challenge] of -1 appends nothing.
-## ENet, DQP and A2S on ONE UDP port, over real sockets: the default arrangement of a
-## dual-stack server, where the transport's demux owns the port and this addon is a
-## handler on it rather than a socket of its own.
+## ENet, DQP and A2S on ONE UDP port over real sockets: the transport's demux owns the port
+## and this addon is a handler on it.
 func _test_shared_udp_port() -> void:
 	print("")
 	_section("[enet, dqp and a2s on one udp port]")
@@ -946,8 +917,6 @@ class _A2SReader extends RefCounted:
 		return offset == data.size()
 
 
-# --- The sections DQP has and A2S cannot -----------------------------------
-
 func _test_sections() -> void:
 	print("")
 	_section("[sections]")
@@ -996,8 +965,6 @@ func _test_sections() -> void:
 	source.remove_provider(probe)
 	_done()
 
-
-# --- The dot-stats bridge ---------------------------------------------------
 
 func _test_stats() -> void:
 	print("")
@@ -1055,8 +1022,6 @@ func _test_stats() -> void:
 	_done()
 
 
-# --- A2S extra data ---------------------------------------------------------
-
 func _test_a2s_extra_data() -> void:
 	print("")
 	_section("[a2s extra data]")
@@ -1108,10 +1073,8 @@ func _test_a2s_extra_data() -> void:
 	_check("the keywords flag is set", (edf & DotA2SServer.EDF_KEYWORDS) != 0)
 	_check("the game id flag is set", (edf & DotA2SServer.EDF_GAME_ID) != 0)
 
-	# The order below is the protocol's field order, and it is NOT the numeric
-	# order of the bits. A writer that used the numeric order produces a response
-	# every client misparses, and none of them report an error — they read a port
-	# out of the middle of a string. This is the check that catches it.
+	# The order below is the protocol's field order, not the numeric order of the bits.
+	# A writer using the numeric order makes every client misparse silently (a port read out of a string).
 	r.u16()                                       # port
 	_check("the server id round-trips", r.u64() == 0x0110000112345678)
 	_check("the spectator port round-trips", r.u16() == 27020)
@@ -1171,8 +1134,6 @@ func _a2s_cookie(query: DotQueryServer, address: String, port: int) -> int:
 	return reader.u32()
 
 
-# --- Stand-ins --------------------------------------------------------------
-
 ## A provider standing in for a game, to prove the plug-in point moves the revision.
 class SectionProbe extends DotQueryProvider:
 	var round_number: int = 0
@@ -1185,9 +1146,7 @@ class SectionProbe extends DotQueryProvider:
 
 
 ## A statistics tracker with dot-stats' shape and none of its identifiers.
-##
-## The bridge is duck-typed precisely so a game can hand it something of its own,
-## and this is that case exercised rather than asserted in a comment.
+## The bridge is duck-typed so a game can hand it something of its own; this exercises that case.
 class FakeTracker extends RefCounted:
 	var schema := FakeSchema.new()
 	var _rows: Dictionary = {}

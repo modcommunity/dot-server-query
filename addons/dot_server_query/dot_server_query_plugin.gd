@@ -1,11 +1,7 @@
 @tool
 extends EditorPlugin
 
-## Editor entry point for dot-server-query. Registers inspector types only.
-##
-## No autoloads: a project may run a server and a client in one process, and two
-## servers in one editor session, and a singleton would make both impossible. The
-## host places [DotQueryHost] itself and points it at a server with a [DotNodeRef].
+## Editor entry point for dot-server-query. Registers inspector types only; no autoloads.
 
 const _ICON := "res://addons/dot_server_query/icon_placeholder.svg"
 

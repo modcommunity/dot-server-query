@@ -3,58 +3,20 @@ class_name DotQueryHost
 extends Node
 
 ## Plugs the query responders into a [DotServer], and owns their lifetime.
-##
-## [b]This node is the whole integration.[/b] dot-server names nothing in this
-## addon: it holds a hook, and this fills it. Add a [DotQueryHost] to a server's
-## scene and the server answers queries; leave it out and dot-server still parses,
-## still boots and still installs with dot-core alone, which is the property that
-## made the query code worth moving out in the first place. A script mentioning a
-## [code]class_name[/code] the project does not have fails to parse and takes every
-## script referencing it down with it, so an optional addon that dot-server named
-## directly would not be optional at all.
-##
-## What it brings up, in the order it has to:
-##
-## 1. [DotQuerySource], because both protocols read from it and neither can start
-##    without it.
-## 2. [DotQueryServer] (DQP), which binds first so that it owns the socket when the
-##    two share one.
-## 3. [DotA2SServer], which either takes that socket over from DQP or binds its own.
-##
-## [b]One socket or two, and one port or two.[/b] The two protocols are told apart
-## by their first four bytes — [code]FF FF FF FF[/code] is A2S, [code]DQP1[/code]
-## is not — so both can answer on the game port, which is the only port a tracker
-## will try. Give them different ports and they bind separately; give them the same
-## one and DQP binds it and hands A2S the datagrams that are A2S's. Neither
-## arrangement changes a single byte of either protocol.
-##
-## [codeblock]
-## var host := DotQueryHost.new()
-## host.app_url = "arena"          # the app's URL segment on the website
-## server.add_child(host)          # finds the server and attaches itself
-## [/codeblock]
+## dot-server names nothing here; add this to its scene to answer queries.
+## Brings up [DotQuerySource], then [DotQueryServer] (binds first, owns a shared socket), then [DotA2SServer].
 
 const CHANNEL := "query"
 const SERVICE := &"dot_query_host"
 
-## The server to answer for. Defaults to whichever one is in [DotRegistry].
-##
-## Explicit rather than assumed, because a project may run two servers in one
-## process — which is what testing a listen server against a dedicated one means —
-## and a host that grabbed "the" server would attach to whichever booted first.
+## The server to answer for. Defaults to the one in [DotRegistry]; explicit because a process may run two.
 @export var server_ref: DotNodeRef = null
 
-## How long to wait for a server to appear in [DotRegistry] before giving up.
-##
-## Only used when [member server_ref] is the default registry lookup. A ref
-## naming a path or a node resolves on the first try and never waits.
+## How long to wait for a server to appear in [DotRegistry]. Only the default registry lookup waits.
 @export_range(0.0, 60.0, 0.5) var attach_timeout_sec: float = 10.0
 
 ## The app's URL segment on the website: this game's code name in a listing.
-##
-## Unique and lowercase because the website already made it so, which is the whole
-## reason to reuse it rather than invent a second identifier that has to be kept in
-## step. See [member DotQuerySource.app_url] for why nothing treats it as proof.
+## See [member DotQuerySource.app_url] for why nothing treats it as proof.
 @export var app_url: String = ""
 
 @export_group("Nodes")
@@ -91,15 +53,8 @@ func _ready() -> void:
 	if server_ref == null:
 		server_ref = DotNodeRef.of_service(DotServer.SERVICE)
 
-	# [b]A host is ready before the server beside it has booted.[/b] A server
-	# registers itself part-way through boot(), so a host placed in the same
-	# scene — the ordinary arrangement — looks for it and legitimately finds
-	# nothing. Giving up there produces a server that comes up perfectly and
-	# never answers a query, with nothing in the log to say why.
-	#
-	# Only the registry path waits. A ref naming a path or a node resolves on the
-	# first try, and waiting on one that cannot appear later would just delay the
-	# error by ten seconds.
+	# A host is ready before the server beside it has booted (it registers part-way through boot()),
+	# so only the registry path waits; a path or node ref resolves first try or never.
 	if server_ref.mode == DotNodeRef.Mode.REGISTRY \
 			and DotRegistry.get_service(server_ref.service) == null:
 		var waited := await DotRegistry.await_service(
@@ -127,13 +82,8 @@ func _exit_tree() -> void:
 	DotRegistry.unregister_instance(SERVICE, self)
 
 
-# --- Attaching -------------------------------------------------------------
-
 ## Finds the server and offers itself to it.
-##
-## Safe to call twice. The server opens the listeners when it is ready to; a host
-## added to a server that has already booted is opened immediately, which is what
-## makes this work from a module loaded at runtime as well as from a scene.
+## Safe to call twice; on a server that already booted the listeners open immediately.
 func attach() -> DotResult:
 	if _attached:
 		return DotResult.success(server)
@@ -163,12 +113,8 @@ func attach() -> DotResult:
 	return server.attach_query_host(self)
 
 
-# --- Opening ---------------------------------------------------------------
-
 ## Brings up whichever listeners the configuration asks for.
-##
-## Called by the server. Returns success when nothing is enabled: a server with no
-## query listener is a supported configuration, not a failure.
+## Called by the server. Succeeds when nothing is enabled: no listener is a supported configuration.
 func open() -> DotResult:
 	if _opened:
 		return DotResult.success(self)
@@ -317,13 +263,8 @@ func is_open() -> bool:
 	return _opened
 
 
-# --- Console ---------------------------------------------------------------
-
 ## Registers the query cvar and the two commands that report on this subsystem.
-##
-## They live here rather than in dot-server's builtin command table because the
-## thing they describe lives here: a server without this addon should not offer a
-## `query_status` that can only ever answer "no query listener".
+## Here rather than in dot-server's builtins, so a server without this addon has no dead `query_status`.
 func _register_console() -> void:
 	var console := server.console
 	if console == null:
@@ -375,8 +316,6 @@ func _register_console() -> void:
 		DotAdminFlags.GENERIC
 	)
 
-
-# --- Reporting -------------------------------------------------------------
 
 func describe() -> Dictionary:
 	return {
