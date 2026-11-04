@@ -1,0 +1,3 @@
+# markdown-wrap
+# Baselines only shrink: scripts/<gate> --update lowers or drops entries and refuses to add.
+addons/dot_server_query/PROTOCOL.md::hard_wrap	54
