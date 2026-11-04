@@ -352,6 +352,13 @@ func _info_response() -> PackedByteArray:
 	# 0.1.0, so every A2S query answered 0.1.0 whatever release the server was on.
 	_put_cstring(buf, a2s_version(info))
 
+	_put_extra_fields(buf, snap)
+	return buf.data_array
+
+
+## The extra-data flag byte and the fields it announces, at the tail of A2S_INFO.
+func _put_extra_fields(buf: StreamPeerBuffer, snap: DotQuerySnapshot) -> void:
+	var config := server.config
 	var tags := _keywords(snap)
 
 	# Extra fields are written in the protocol's order, not the bitfield's numeric order: a reader
@@ -382,8 +389,6 @@ func _info_response() -> PackedByteArray:
 
 	if edf & EDF_GAME_ID:
 		buf.put_u64(game_id)
-
-	return buf.data_array
 
 
 ## Whether this app id is one of the few that carry the extra A2S_INFO block.

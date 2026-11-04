@@ -233,6 +233,14 @@ func _build_info() -> Dictionary:
 		"secure": false,
 	}
 
+	_add_optional_info(info, config)
+	_apply_console_info(info, config, console)
+
+	return info
+
+
+## Fields that exist only when the server serves ENet over UDP, the query listener, or a game.
+func _add_optional_info(info: Dictionary, config: DotServerConfig) -> void:
 	# Where a native client can reach ENet over UDP, when this server serves it.
 	# A native build that reads this tries UDP first and falls back to WebSocket;
 	# absent (or 0) it goes straight to WebSocket, as every client did before.
@@ -258,6 +266,9 @@ func _build_info() -> Dictionary:
 		info["game_version"] = descriptor.version
 		info["content"] = descriptor.manifest_url != ""
 
+
+## Live console values override the boot-time config in the listing.
+func _apply_console_info(info: Dictionary, config: DotServerConfig, console: Variant) -> void:
 	if console != null:
 		# Read through the console rather than the config: an operator who typed
 		# `hostname "Something Else"` expects the listing to say so, and the config
@@ -266,8 +277,6 @@ func _build_info() -> Dictionary:
 		info["max_players"] = console.get_int("sv_maxplayers", config.max_players)
 		info["visibility"] = "password" \
 			if console.get_string("sv_password", "") != "" else "public"
-
-	return info
 
 
 func _build_players(snap: DotQuerySnapshot) -> Array:
