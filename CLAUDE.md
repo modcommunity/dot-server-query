@@ -32,7 +32,7 @@ Read the family [CLAUDE.md](../../CLAUDE.md) first; this file is only what is sp
 
 ## Running and testing
 
-- The family's two steps ([game-dev/CLAUDE.md](../../CLAUDE.md#validating-anything)), then `godot --headless --path . res://examples/query_selftest.tscn`. Exits non-zero on failure. The last section boots a dual-stack server and asks A2S, and joins over ENet, on one real UDP port.
+- The family's two steps ([family CLAUDE.md](../../CLAUDE.md#validating-anything)), then `godot --headless --path . res://examples/query_selftest.tscn`. Exits non-zero on failure. The last section boots a dual-stack server and asks A2S, and joins over ENet, on one real UDP port.
 - Both protocols are driven without a socket: `handle_datagram` takes a datagram and returns the datagrams to send, so DQP and A2S run in process (and on a machine where binding is refused). The listeners still bind for real in the example, so the shared-socket path is exercised rather than assumed.
 - **A change here means re-running dot-server's `examples/dedicated_server.tscn`, game-arena's and game-g2gfast's `examples/dedicated.tscn`.** Arena asks its own server over a real UDP socket through dot-browser; g2gfast asserts what its module contributes.
 
