@@ -40,7 +40,7 @@ host._ready()  ->  attach_query_host(self)
 
 **The first case is the ordinary one and it is the one that would have been missed.** A host placed in a scene beside a server is ready *before* that server has booted, and a server registers itself part-way through `boot()`, so the first lookup legitimately finds nothing. Giving up there produces a server that comes up perfectly and never answers a query, with nothing in the log to say why. `DotQueryHost._ready` waits, and only on the registry path: a ref naming a path or a node resolves on the first try, and waiting on one that cannot appear later would just delay the error by ten seconds.
 
-Both orders are in the suite. `game-arena` uses a path ref and attaches before boot; `game-g2gfast` uses the registry default and attaches after.
+Both orders are in the suite. `game-fatal-contact` uses a path ref and attaches before boot; `game-airdrift` uses the registry default and attaches after.
 
 ## Sections, and the two rules about the revision
 
