@@ -1,5 +1,3 @@
-# dot-server-query
-
 Lets a game server answer "who is on you, what are you running, and is it worth joining". It speaks two protocols from one snapshot, so they never disagree about the player count.
 
 | | **DQP** (the dot query protocol) | **A2S** |
